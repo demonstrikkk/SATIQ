@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 
 // Import routes
 import authRouter from './routes/auth';
@@ -51,7 +52,14 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 // Serve uploaded assets statically (used by AssetMeta.url)
-app.use('/api/assets', express.static(path.join(__dirname, '../upload')));
+// Robust for both ts-node-dev (gateway/src -> ../upload) and compiled (dist/gateway/src -> ../../../gateway/upload)
+const candidates = [
+  path.join(__dirname, '../upload'),
+  path.resolve(__dirname, '../../../gateway/upload'),
+  path.resolve(process.cwd(), 'gateway/upload'),
+];
+const uploadDir = candidates.find((p) => { try { return fs.existsSync(p); } catch { return false; } }) ?? candidates[0];
+app.use('/api/assets', express.static(uploadDir));
 
 // Unprotected routes
 app.use('/api/auth', authRouter);
