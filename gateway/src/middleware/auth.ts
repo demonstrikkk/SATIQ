@@ -17,7 +17,11 @@ export const authenticateToken = (req: AuthenticatedRequest, res: Response, next
     return res.status(401).json({ error: 'Access token required' });
   }
 
-  const secret = process.env.JWT_SECRET || 'supersecretkeyreplaceinproduction';
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    console.error('[auth] JWT_SECRET is not configured — refusing to verify tokens.');
+    return res.status(500).json({ error: 'Server authentication is not configured (JWT_SECRET missing)' });
+  }
 
   jwt.verify(token, secret, (err, decoded) => {
     if (err) {
