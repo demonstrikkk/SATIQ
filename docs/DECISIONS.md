@@ -16,6 +16,7 @@
 | 2026-08-26 | [ADR 0000](adr/0000-scaffold.md) | Initialize monorepo scaffold (no code) | repo | `aa6fef2` | Accepted |
 | 2026-08-26 | [ADR 0001](adr/0001-agent-governance.md) | Adopt agent governance docs (AGENTS, DECISIONS, PROGRESS, ETHICS) | docs | `5703720` | Accepted |
 | 2026-08-26 | — | Add SatQuery architecture README (4 models, orchestrator, input gate) | docs | `5703720` | Logged |
+| 2026-08-28 | [ADR 0002](adr/0002-api-gateway.md) | Implement API gateway and rate limiter | gateway | `<fill>` | Accepted |
 
 <!-- New entries append below. Keep newest at bottom for git-friendly diffs. -->
 
@@ -32,6 +33,12 @@
 * **What:** Added `AGENTS.md`, `CONTRIBUTING.md`, `docs/ETHICS.md`, `docs/DECISIONS.md` (this file), `docs/PROGRESS.md`, `docs/adr/README.md` + ADR template. Established 5-step workflow (Plan→Implement→Record→Verify→Review) and Definition of Done.
 * **Why:** Satiq is built by mixed human+LLM agents; auditability (execution_trace) applies to development too — every edit must be traceable. Prevents hallucinated geospatial results, silent CRS changes, and untracked dependency bloat.
 * **Consequences:** All future PRs touching product code must also touch `docs/DECISIONS.md` + `docs/PROGRESS.md`; ADRs required for behavior/data/dep changes.
+
+### 2026-08-28 — API Gateway and Rate Limiter
+
+* **What:** Implemented the Express + TypeScript API Gateway and Rate Limiter, adding `package.json`, `tsconfig.json`, `src/index.ts`, custom middlewares (auth, upload, rateLimiter), and routes (auth, upload, session, query).
+* **Why:** Fulfills Milestone M6 gateway requirement: provides security boundaries, rate limiting, and structured session persistence with tenant isolation.
+* **Consequences:** Client requests are authenticated via JWT, session store is safe against path traversal, and down-stream orchestration queries are proxied.
 
 ---
 

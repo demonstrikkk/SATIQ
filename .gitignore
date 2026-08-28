@@ -46,3 +46,11 @@ npm-debug.log*
 # Uncomment if reports should be ignored:
 # evaluation/reports/*.json
 # evaluation/reports/*.html
+
+# Gateway Runtime Assets & Builds
+gateway/dist/
+gateway/upload/*
+!gateway/upload/.gitkeep
+gateway/session/*
+!gateway/session/.gitkeep
+

@@ -61,10 +61,12 @@ How will we prove it works? (tests, benchmark, compose check — paste command/o
 |-----|-------|--------|------|
 | [0000](0000-scaffold.md) | Initialize monorepo scaffold | Accepted | 2026-08-26 |
 | [0001](0001-agent-governance.md) | Agent governance docs | Accepted | 2026-08-26 |
+| [0002](0002-api-gateway.md) | Implement API gateway and rate limiter | Accepted | 2026-08-28 |
 
 ## Existing ADRs
 
 * `0000-scaffold.md` — scaffold + build priority
 * `0001-agent-governance.md` — agent workflow + traceability
+* `0002-api-gateway.md` — API gateway and rate limiter implementation
 
 Create new ADRs by copying the template above. Link them from `docs/DECISIONS.md` Index and from this table.
