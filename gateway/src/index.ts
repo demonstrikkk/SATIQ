@@ -18,13 +18,20 @@ import { authenticateToken } from './middleware/auth';
 // Load environment variables
 dotenv.config();
 
+if (!process.env.JWT_SECRET) {
+  console.warn('[auth] JWT_SECRET is not set — authentication endpoints will refuse to work until it is configured.');
+}
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Security and Logging middleware
 app.use(helmet());
+
+// CORS: allow-list from CORS_ORIGIN (comma-separated); defaults to all origins in development.
+const corsOrigins = (process.env.CORS_ORIGIN ?? '*').split(',').map((o) => o.trim());
 app.use(cors({
-  origin: '*', // Allow all origins in development; tighten in production
+  origin: corsOrigins.includes('*') ? true : corsOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -43,8 +50,8 @@ app.get('/health', (req: Request, res: Response) => {
   });
 });
 
-// Serve uploaded files statically (optional, for viewing overlays/masks)
-app.use('/upload', express.static(path.join(__dirname, '../upload')));
+// Serve uploaded assets statically (used by AssetMeta.url)
+app.use('/api/assets', express.static(path.join(__dirname, '../upload')));
 
 // Unprotected routes
 app.use('/api/auth', authRouter);
