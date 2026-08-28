@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+
+# Frontend
+frontend/dist/
+frontend/build/
+frontend/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.docker/
+
+# Evaluation reports (generated)
+# Uncomment if reports should be ignored:
+# evaluation/reports/*.json
+# evaluation/reports/*.html
+
+# Gateway Runtime Assets & Builds
+gateway/dist/
+gateway/upload/*
+!gateway/upload/.gitkeep
+gateway/session/*
+!gateway/session/.gitkeep
+

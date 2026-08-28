@@ -1,0 +1,18 @@
+version: "3.9"
+
+# Satiq — monorepo compose (skeleton, services to be added)
+services:
+  # frontend:
+  #   build: ./frontend
+  #   ports:
+  #     - "3000:3000"
+
+  # gateway:
+  #   build: ./gateway
+  #   ports:
+  #     - "4000:4000"
+
+  # orchestrator:
+  #   build: ./orchestrator
+  #   ports:
+  #     - "8000:8000"
