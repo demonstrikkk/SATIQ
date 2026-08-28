@@ -15,7 +15,7 @@ If unsure: write the ADR. Cost is low; untracked decisions are expensive.
 
 ## Numbering
 
-Sequential `NNNN` — zero-padded, monotonic. Next available after `0001` is `0002`.
+Sequential `NNNN` — zero-padded, monotonic. Next available after `0003` is `0004`.
 
 ## Template
 
@@ -61,12 +61,14 @@ How will we prove it works? (tests, benchmark, compose check — paste command/o
 |-----|-------|--------|------|
 | [0000](0000-scaffold.md) | Initialize monorepo scaffold | Accepted | 2026-08-26 |
 | [0001](0001-agent-governance.md) | Agent governance docs | Accepted | 2026-08-26 |
+| [0002](0002-api-gateway.md) | Implement API gateway and rate limiter | Accepted | 2026-08-28 |
 | [0003](0003-frontend-workstation.md) | Frontend Analysis Workstation (Phase 0–12) | Accepted | 2026-08-28 |
 
 ## Existing ADRs
 
 * `0000-scaffold.md` — scaffold + build priority
 * `0001-agent-governance.md` — agent workflow + traceability
+* `0002-api-gateway.md` — API gateway and rate limiter implementation
 * `0003-frontend-workstation.md` — frontend workstation (Phase 0–12)
 
 Create new ADRs by copying the template above. Link them from `docs/DECISIONS.md` Index and from this table.

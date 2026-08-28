@@ -47,6 +47,13 @@ npm-debug.log*
 # evaluation/reports/*.json
 # evaluation/reports/*.html
 
+# Gateway Runtime Assets & Builds
+gateway/dist/
+gateway/upload/*
+!gateway/upload/.gitkeep
+gateway/session/*
+!gateway/session/.gitkeep
+
 # Logs
 logs
 *.log
