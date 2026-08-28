@@ -1,0 +1,76 @@
+@theme inline {
+  /* Required palette — strict dark */
+  --color-background: #090D14;
+  --color-foreground: #F8FAFC;
+  --bg-app: #090D14;
+  --bg-sidebar: #0D121F;
+  --bg-panel: #0D121F;
+  --bg-card: #0D121F;
+  --bg-hover: #0D121F;
+  --bg-active: #0D121F;
+  --bg-input: #0D121F;
+
+  /* Legacy surface mappings — remapped to required tokens */
+  --color-surface-1: #0D121F;
+  --color-surface-2: #0D121F;
+  --color-surface-3: #0D121F;
+  --color-surface-4: #0D121F;
+  --color-surface-5: #1e293b;
+
+  /* Borders — subtle dark tokens per spec */
+  --border: rgb(30 41 59 / 0.6);
+  --border-subtle: rgb(30 41 59 / 0.6);
+  --border-accent: #06B6D4;
+  --color-border-subtle: #1E293B;
+  --color-border-default: #334155;
+  --color-border-strong: #334155;
+  --color-border-active: #06B6D4;
+  --color-border-focus: #06B6D4;
+
+  /* Text */
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --text-accent: #60A5FA;
+  --color-text-primary: #F8FAFC;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted: #64748B;
+  --color-text-faint: #475569;
+
+  /* Accents — cyan is #06B6D4 per spec, blue aliases to cyan */
+  --accent-blue: #06B6D4;
+  --accent-cyan: #06B6D4;
+  --accent-green: #22C55E;
+  --accent-amber: #F59E0B;
+  --accent-red: #EF4444;
+  --accent-purple: #A78BFA;
+  --color-accent: #06B6D4;
+  --color-accent-soft: rgba(6,182,212,0.12);
+  --color-accent-glow: rgba(6,182,212,0.25);
+  --color-accent-strong: #0891b2;
+
+  /* Status — running uses cyan */
+  --status-completed: #22C55E;
+  --status-running: #06B6D4;
+  --status-pending: #64748B;
+  --color-success: #22C55E;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+  --color-info: #06B6D4;
+  --color-violet: #64748B;
+
+  /* Domain — builtup/optical/water use cyan */
+  --color-water: #06B6D4;
+  --color-vegetation: #22C55E;
+  --color-builtup: #06B6D4;
+  --color-change: #F59E0B;
+  --color-risk: #EF4444;
+  --color-sar: #64748B;
+  --color-optical: #06B6D4;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+}

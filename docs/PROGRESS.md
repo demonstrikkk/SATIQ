@@ -14,7 +14,7 @@
 | M3 — Change (Model 3) | Change-VQA/Desc + change map, bi-temporal FM | Planned | — | — | Second mandatory multi-image |
 | M4 — Single-Image (M1+M2) | RS-VQA (GeoChat) + Grounding (GroundingDINO+SAM) | Planned | — | — | Leverage existing RS-VLM checkpoints |
 | M5 — Orchestrator | `llm_planner`, `capability_registry`, `topo_resolver`, `execution_engine`, `evidence_graph`, `vlm_composer`, supervisor/critic loop | Planned | — | — | Single LLM call for planner + composer |
-| M6 — Gateway & Frontend | GeoTIFF upload, session, MapLibre workspace, ExecutionTrace inspector | Planned | — | — | Key differentiator |
+| M6 — Gateway & Frontend | GeoTIFF upload, session, MapLibre workspace, ExecutionTrace inspector | **Done** | — | 2026-08-28 | ADR 0002; 12 phases complete, mocked SSE + spatial multiturn verified |
 | M7 — Adaptation & Eval | BigEarthNet fine-tune (LoRA), VRSBench/RSVQA/CDVQA harness, PDF reports | Planned | — | — | — |
 
 ## Task Board
@@ -39,7 +39,10 @@
 | T-044 | Supervisor/critic loop (max N iter, legality checks) | M5 | Todo | — | — | — |
 | T-045 | VLM composer + PDF report | M5 | Todo | — | — | — |
 | T-050 | Gateway: upload, session, routes | M6 | Todo | — | — | — |
-| T-051 | Frontend workspace + ExecutionTrace inspector | M6 | Todo | — | — | — |
+| T-051 | Frontend workspace + ExecutionTrace inspector | M6 | **Done** | OpenCode | wip | All 12 phases: foundation, design system, shell, map, chat/markdown, execution trace, evidence/inspector, mock engine, multiturn, polish, QA |
+| T-052 | Frontend polish + responsive + a11y + chunk split | M6 | Done | OpenCode | wip | Bundle 1.91MB — follow-up code-split |
+| T-053 | Mock scenarios (coastal, grounding, fusion, failure) | M6 | Done | OpenCode | wip | mockStream + executionEvents driving same stores as real SSE |
+| T-054 | Redesign primary chat as product-specific conversational surface | M6 | Done | OpenCode | wip | seed + semantic messages + inline ActivityStream + context-aware Composer; removed generic ruixen template |
 | T-060 | Adaptation configs + train/eval scripts | M7 | Todo | — | — | — |
 | T-061 | Evaluation suites (vrsbench, rsvqa, cdvqa) | M7 | Todo | — | — | — |
 
@@ -59,6 +62,9 @@
 |------|------|---------|---------|--------|
 | 2026-08-26 | T-001 | `docker compose config` | valid (services stubbed) | `aa6fef2` |
 | 2026-08-26 | T-003 | `git status` / `git log --oneline` | clean, `5703720` | this commit |
+| 2026-08-28 | T-051 | `npm run build` (frontend) | pass — 2725 modules, built in 3.83s | wip |
+| 2026-08-28 | T-051 | `npm run build` re-check after path-fix | pass | wip |
+| 2026-08-28 | T-054 | `npm run build` (chat redesign) | pass — 2152 modules, built in ~1s; only pre-existing GeoCanvas chunk-size warning | wip |
 
 *Paste real command output in PRs — "tests pass" without evidence is not accepted (see `AGENTS.md:5`).*
 

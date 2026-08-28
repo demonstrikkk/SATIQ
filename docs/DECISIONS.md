@@ -16,6 +16,8 @@
 | 2026-08-26 | [ADR 0000](adr/0000-scaffold.md) | Initialize monorepo scaffold (no code) | repo | `aa6fef2` | Accepted |
 | 2026-08-26 | [ADR 0001](adr/0001-agent-governance.md) | Adopt agent governance docs (AGENTS, DECISIONS, PROGRESS, ETHICS) | docs | `5703720` | Accepted |
 | 2026-08-26 | — | Add SatQuery architecture README (4 models, orchestrator, input gate) | docs | `5703720` | Logged |
+| 2026-08-28 | [ADR 0003](adr/0003-frontend-workstation.md) | Build Satiq frontend analysis workstation (Phases 0-12) | frontend | `wip` | Accepted |
+| 2026-08-28 | — | Redesign primary chat as product-specific conversational operating surface (seed, semantic messages, inline activity, context-aware composer) | frontend | `wip` | Logged |
 
 <!-- New entries append below. Keep newest at bottom for git-friendly diffs. -->
 
@@ -44,3 +46,14 @@
 5. Update `docs/PROGRESS.md` in the same PR.
 
 **Ask:** Does this change alter behavior, data handling, storage, external API, or dependencies? → ADR. Otherwise → line item here is enough.
+
+### 2026-08-28 — Chat redesign
+
+* **What:** Replaced the generic AI-template chat (`ruixen-moon-chat`, moon-image empty state, dual composers, dead `ChatPanel`/`SatiqAIPanel`/`NavigationRail`) with a product-specific conversational surface:
+  * `ConversationSeed` — empty state surfaces the 4 real capabilities (change / grounding / optical+SAR fusion / land-cover VQA) + recent-work continuity; no decorative imagery.
+  * `MessageItem` — semantic rendering: understated user block, document-style assistant answer with capability tag + confidence badge, inline activity, copy/inspect actions.
+  * `ActivityStream` — compact, expandable view of the real execution pipeline (planner → models → evidence → composer) read live from `execution.store`; transparency without noise.
+  * `Composer` — context-aware input: removable AOI/file chips, drag-drop attach, progressive capability hints on focus, ⌘K.
+  * Reuses existing `MarkdownRenderer` (chart/table/comparison/map blocks), `RightThinkingPanel` (deep inspector), `GeoCanvas`, and `map.store`/execution stores.
+* **Why:** The previous chat was a generic ChatGPT-style wrapper (external moon CDN image, leftover `ruixen` template) that violated the product philosophy in the design brief. Satiq's intelligence (multi-agent geospatial QA, auditable traces, visual evidence) must be visible in the interface.
+* **Consequences:** `npm run build` passes (tsc + vite). Map still appears contextually after first message; right "Thinking" panel remains the deep inspector.
