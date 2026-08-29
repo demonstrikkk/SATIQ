@@ -1,10 +1,12 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 
 /**
- * Custom auto-scroll without layout shift.
- * - Tracks scroll position; pauses if user scrolls >120px from bottom
- * - When pinned, sets scrollTop = scrollHeight instantly (no smooth latency)
- * - Eliminates scrollIntoView() jank on token chunks
+ * DURABILITY INVARIANT — AUTO-SCROLL MUST RESPECT USER INTENT:
+ * - Auto-scroll ONLY when isPinned (distanceFromBottom <= 120). If user scrolls up >120px, NEVER force scroll on new tokens.
+ * - New tokens must NOT re-enable auto-scroll; only user clicking "Scroll to bottom" (forceScrollToBottom) re-pins.
+ * - forceScrollToBottom is the manual override — it sets isPinned=true and smooth-scrolls. Do not call it from auto effects.
+ * - Do not add scroll-smooth CSS to the container; instant scrollTop is required for streaming, smooth only for force.
+ * Future edits: keep 120px threshold, keep isPinnedRef guard in scrollToBottom, keep force as only re-pin.
  */
 export function useAutoScroll(deps: unknown[] = []) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -38,7 +40,8 @@ export function useAutoScroll(deps: unknown[] = []) {
     if (!el) return;
     isPinnedRef.current = true;
     setIsPinned(true);
-    el.scrollTop = el.scrollHeight;
+    // Smooth for user-initiated override, instant for auto
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, []);
 
   useEffect(() => {

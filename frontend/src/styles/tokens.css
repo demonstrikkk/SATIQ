@@ -1,76 +1,110 @@
 @theme inline {
-  /* Required palette — strict dark */
-  --color-background: #090D14;
-  --color-foreground: #F8FAFC;
-  --bg-app: #090D14;
-  --bg-sidebar: #0D121F;
-  --bg-panel: #0D121F;
-  --bg-card: #0D121F;
-  --bg-hover: #0D121F;
-  --bg-active: #0D121F;
-  --bg-input: #0D121F;
+  /* =====================================================================
+     SATIQ Design Tokens — 5-level surface hierarchy for genuine depth
+     Level 0 (deepest): App background  #05080F
+     Level 1: Sidebar / panel shells    #0B1120
+     Level 2: Cards / content areas     #101827
+     Level 3: Elevated / selected       #141F30
+     Level 4: Floats / tooltips         #1A2740
+     ===================================================================== */
 
-  /* Legacy surface mappings — remapped to required tokens */
-  --color-surface-1: #0D121F;
-  --color-surface-2: #0D121F;
-  --color-surface-3: #0D121F;
-  --color-surface-4: #0D121F;
-  --color-surface-5: #1e293b;
+  --color-background: #05080F;
+  --color-foreground: #F1F5F9;
 
-  /* Borders — subtle dark tokens per spec */
-  --border: rgb(30 41 59 / 0.6);
-  --border-subtle: rgb(30 41 59 / 0.6);
+  /* Explicit surface levels */
+  --surface-0: #05080F;
+  --surface-1: #0B1120;
+  --surface-2: #101827;
+  --surface-3: #141F30;
+  --surface-4: #1A2740;
+  --surface-hover: #172033;
+
+  /* Legacy aliases */
+  --bg-app: #05080F;
+  --bg-sidebar: #0B1120;
+  --bg-panel: #0B1120;
+  --bg-card: #101827;
+  --bg-hover: #172033;
+  --bg-active: #141F30;
+  --bg-input: #0B1120;
+  --color-surface-1: #0B1120;
+  --color-surface-2: #101827;
+  --color-surface-3: #141F30;
+  --color-surface-4: #1A2740;
+  --color-surface-5: #1E293B;
+
+  /* Borders — 3 levels of separation */
+  --border: rgba(51, 65, 85, 0.45);
+  --border-subtle: rgba(30, 41, 59, 0.5);
+  --border-mid: rgba(51, 65, 85, 0.55);
+  --border-strong: rgba(71, 85, 105, 0.65);
   --border-accent: #06B6D4;
-  --color-border-subtle: #1E293B;
-  --color-border-default: #334155;
-  --color-border-strong: #334155;
+  --color-border-subtle: rgba(30, 41, 59, 0.5);
+  --color-border-default: rgba(51, 65, 85, 0.55);
+  --color-border-strong: rgba(71, 85, 105, 0.65);
   --color-border-active: #06B6D4;
   --color-border-focus: #06B6D4;
 
-  /* Text */
-  --text-primary: #F8FAFC;
+  /* Text — 4-level hierarchy */
+  --text-primary: #F1F5F9;
   --text-secondary: #94A3B8;
   --text-muted: #64748B;
-  --text-accent: #60A5FA;
-  --color-text-primary: #F8FAFC;
+  --text-faint: #3F5068;
+  --text-accent: #06B6D4;
+  --text-accent-alt: #60A5FA;
+  --color-text-primary: #F1F5F9;
   --color-text-secondary: #94A3B8;
   --color-text-muted: #64748B;
-  --color-text-faint: #475569;
+  --color-text-faint: #3F5068;
 
-  /* Accents — cyan is #06B6D4 per spec, blue aliases to cyan */
-  --accent-blue: #06B6D4;
+  /* Accents */
   --accent-cyan: #06B6D4;
+  --accent-blue: #3B82F6;
+  --accent-blue-soft: #60A5FA;
   --accent-green: #22C55E;
   --accent-amber: #F59E0B;
   --accent-red: #EF4444;
   --accent-purple: #A78BFA;
   --color-accent: #06B6D4;
-  --color-accent-soft: rgba(6,182,212,0.12);
-  --color-accent-glow: rgba(6,182,212,0.25);
-  --color-accent-strong: #0891b2;
+  --color-accent-soft: rgba(6, 182, 212, 0.10);
+  --color-accent-glow: rgba(6, 182, 212, 0.22);
+  --color-accent-strong: #0891B2;
 
-  /* Status — running uses cyan */
+  /* Status */
   --status-completed: #22C55E;
   --status-running: #06B6D4;
-  --status-pending: #64748B;
+  --status-pending: #475569;
   --color-success: #22C55E;
   --color-warning: #F59E0B;
   --color-danger: #EF4444;
   --color-info: #06B6D4;
   --color-violet: #64748B;
 
-  /* Domain — builtup/optical/water use cyan */
+  /* Domain */
   --color-water: #06B6D4;
   --color-vegetation: #22C55E;
-  --color-builtup: #06B6D4;
+  --color-builtup: #3B82F6;
   --color-change: #F59E0B;
   --color-risk: #EF4444;
-  --color-sar: #64748B;
+  --color-sar: #8B5CF6;
   --color-optical: #06B6D4;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  /* Radii — html chat refines to 4/8/10 to match satquery-ai.html */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
   --radius-xl: 18px;
   --radius-2xl: 24px;
+
+  /* HTML chat accent mapping — unified to cyan primary */
+  --chat-accent: #06B6D4;
+  --chat-accent-dim: rgba(6, 182, 212, 0.10);
+  --chat-accent-border: rgba(6, 182, 212, 0.35);
+
+  /* Shadow tokens */
+  --shadow-panel: 0 4px 24px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.025) inset;
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.35);
+  --shadow-float: 0 12px 40px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.7);
+  --shadow-accent: 0 4px 20px rgba(6, 182, 212, 0.35);
 }

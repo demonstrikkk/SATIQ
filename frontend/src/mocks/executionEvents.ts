@@ -30,7 +30,7 @@ export function coastalChangeEvents(): ExecutionEvent[] {
 > Confidence: 0.87 • Area: 18.7 ha • Sensor: Sentinel-2 L2A`;
 
   const block2 = `\`\`\`chart
-{"type":"bar","title":"Change by sector (ha)","data":[{"name":"Sector A","value":9.2},{"name":"Sector B","value":6.1},{"name":"Sector C","value":3.4}]}
+{"type":"bar","title":"Change by sector (ha)","data":[{"name":"Sector A","value":9.2},{"name":"Sector B","value":6.1},{"name":"Sector C","value":3.4}],"unit":"ha","note":"Sentinel-2 • EPSG:32617 • 10 m GSD • deterministic mask area"}
 \`\`\``;
 
   const block3 = `| Area | Change | Confidence |
@@ -91,7 +91,7 @@ export function groundingEvents(): ExecutionEvent[] {
 | Status | OK |`;
 
   const block4 = `\`\`\`chart
-{"type":"bar","title":"Detection confidence","data":[{"name":"Water","value":0.87},{"name":"Background","value":0.13}]}
+{"type":"donut","title":"Detection confidence","data":[{"name":"Water","value":0.87},{"name":"Background","value":0.13}],"unit":"%","note":"GroundingDINO • BBox [0.18,0.09,0.47,0.42] • img_001"}
 \`\`\``;
 
   return [
@@ -123,7 +123,7 @@ export function fusionEvents(query: string): ExecutionEvent[] {
 > Per-modality confidence — optical 0.82 · sar 0.75 · fused 0.88 • Status: OK`;
 
   const block2 = `\`\`\`chart
-{"type":"fusion","title":"Modality confidence","data":[{"name":"Optical","value":0.82},{"name":"SAR","value":0.75},{"name":"Fused","value":0.88}]}
+{"type":"bar","title":"Modality confidence","data":[{"name":"Optical","value":0.82},{"name":"SAR","value":0.75},{"name":"Fused","value":0.88}],"unit":"%","note":"CROMA cross-attention • Optical 82% · SAR 75% · Fused 88%"}
 \`\`\``;
 
   const block3 = `| Modality | Confidence |
@@ -179,7 +179,7 @@ export function vqaEvents(): ExecutionEvent[] {
 | Confidence | 84% |`;
 
   const block3 = `\`\`\`chart
-{"type":"bar","title":"Land-cover confidence","data":[{"name":"Agriculture","value":0.84},{"name":"Settlement","value":0.62},{"name":"Forest","value":0.71}]}
+{"type":"donut","title":"Land-cover confidence","data":[{"name":"Agriculture","value":0.84},{"name":"Settlement","value":0.62},{"name":"Forest","value":0.71}],"unit":"%","note":"RS-VQA • Sentinel-2 • img_001 • 10 m GSD"}
 \`\`\``;
 
   return [
