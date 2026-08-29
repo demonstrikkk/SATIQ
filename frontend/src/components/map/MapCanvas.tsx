@@ -4,6 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useMapStore } from "@/store/map.store";
 import { useWorkspaceStore } from "@/store/workspace.store";
 import { useUiStore } from "@/store/ui.store";
+import { useChatStore } from "@/store/chat.store";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Layers, Satellite, Map as MapIcon, Mountain } from "lucide-react";
 
@@ -81,8 +82,28 @@ export function MapCanvas({ compact = false }: { compact?: boolean }) {
           map!.on("click", "detections-fill", (e: any) => {
             const f = e.features?.[0] as any;
             if (!f?.id) return;
-            setSelectedFeatureId(String(f.id));
+            const fid = String(f.id);
+            setSelectedFeatureId(fid);
             if (!inspectorOpen) toggleInspector();
+            // D1: highlight corresponding message — find last assistant message containing this feature label/bbox
+            try {
+              const label = String(f.properties?.label ?? "");
+              const msgs = useChatStore.getState().messages;
+              // search from newest to oldest for matching label or bbox
+              for (let i = msgs.length - 1; i >= 0; i--) {
+                const m = msgs[i];
+                if (m.role !== "assistant") continue;
+                if (label && m.content.toLowerCase().includes(label.toLowerCase().slice(0, 8))) {
+                  const el = document.getElementById(`msg-${m.id}`);
+                  if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el.classList.add("ring-1","ring-[#06B6D4]/30");
+                    setTimeout(() => el.classList.remove("ring-1","ring-[#06B6D4]/30"), 1800);
+                  }
+                  break;
+                }
+              }
+            } catch {}
           });
           map!.on("mouseenter", "detections-fill", () => (map!.getCanvas().style.cursor = "pointer"));
           map!.on("mouseleave", "detections-fill", () => (map!.getCanvas().style.cursor = ""));

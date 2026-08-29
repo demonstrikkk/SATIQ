@@ -5,11 +5,50 @@ import { useSessionStore } from "@/store/session.store";
 import type { ExecutionEvent } from "@/schemas/execution";
 import { coastalChangeEvents, groundingEvents, fusionEvents, vqaEvents, groundingCropSecondEvents } from "./executionEvents";
 
+// ── cancellable controller (mock mode) ───────────────────────────────
+let activeController: AbortController | null = null;
+
+export function isMockGenerating(): boolean {
+  return activeController !== null && !activeController.signal.aborted;
+}
+export function cancelCurrentQuery(): boolean {
+  if (!activeController || activeController.signal.aborted) return false;
+  activeController.abort();
+  // finalize UI: stop streaming flags, move execution to cancelled
+  try {
+    const lastId = (emitSequence as any)._lastId as string | undefined;
+    if (lastId) {
+      const { setStreaming, setThinkingStreaming } = useChatStore.getState();
+      setStreaming(lastId, false);
+      setThinkingStreaming(lastId, false);
+    }
+    const { setGlobalStatus, setComposerStatus } = useExecutionStore.getState();
+    setComposerStatus("failed" as any);
+    setGlobalStatus("cancelled" as any);
+  } catch {}
+  return true;
+}
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException("Aborted","AbortError"));
+  return new Promise<void>((resolve, reject)=>{
+    const t = setTimeout(()=> { signal?.removeEventListener("abort", onAbort); resolve(); }, ms);
+    const onAbort = ()=> { clearTimeout(t); reject(new DOMException("Aborted","AbortError")); };
+    signal?.addEventListener("abort", onAbort, { once:true });
+  });
+}
+
 async function emitSequence(events: ExecutionEvent[], onEvent: (e: ExecutionEvent) => void) {
+  // create fresh controller for this run
+  const controller = new AbortController();
+  activeController = controller;
+  const signal = controller.signal;
+
   const { setGlobalStatus, setPlannerStatus, setModelStatus, setEvidenceStatus, setComposerStatus, setGisDetails, setTaskRouter, setInputStatus, reset } = useExecutionStore.getState();
   const { addMessage, appendChunk, setStreaming, appendThinking, setThinkingStreaming, setThinkingCollapsed } = useChatStore.getState();
 
+  try {
   for (const ev of events) {
+    if (signal.aborted) break;
     onEvent(ev);
     if (ev.event === "query_started") { reset(); setGlobalStatus("queued"); setInputStatus("pending"); }
     if (ev.event === "input_started") { setGlobalStatus("queued"); setInputStatus("running"); }
@@ -65,12 +104,13 @@ async function emitSequence(events: ExecutionEvent[], onEvent: (e: ExecutionEven
     if (ev.event === "thinking_delta") {
       const id = (emitSequence as any)._lastId;
       const chunk: string = ev.payload?.chunk ?? "";
-      // stream thinking char by char for realism
+      // stream thinking char by char for realism — abortable
       for (const ch of chunk) {
+        if (signal.aborted) break;
         appendThinking(id, ch);
-        await new Promise(r => setTimeout(r, 8));
+        try { await abortableSleep(8, signal); } catch { break; }
       }
-      await new Promise(r => setTimeout(r, 40));
+      try { await abortableSleep(40, signal); } catch {}
     }
     if (ev.event === "thinking_done") {
       const id = (emitSequence as any)._lastId;
@@ -94,37 +134,42 @@ async function emitSequence(events: ExecutionEvent[], onEvent: (e: ExecutionEven
       if (segments.length === 1) {
         const lines = chunk.split("\n");
         for (let i = 0; i < lines.length; i++) {
+          if (signal.aborted) break;
           const line = lines[i]! + (i < lines.length - 1 ? "\n" : "");
           if (line.trim().startsWith("```") || line.includes("|") || line.startsWith(">") || line.startsWith("![")) {
             appendChunk(id, line);
-            await new Promise(r => setTimeout(r, 90));
+            try { await abortableSleep(90, signal);} catch{ break; }
           } else {
             for (const ch of line) {
+              if (signal.aborted) break;
               appendChunk(id, ch);
-              await new Promise(r => setTimeout(r, 6));
+              try { await abortableSleep(6, signal);} catch{ break; }
             }
-            await new Promise(r => setTimeout(r, 20));
+            try { await abortableSleep(20, signal);} catch{}
           }
         }
       } else {
         for (const seg of segments) {
+          if (signal.aborted) break;
           if (seg.startsWith("```chart")) {
-            await new Promise(r => setTimeout(r, 320));
+            try { await abortableSleep(320, signal);} catch{ break; }
             appendChunk(id, seg);
-            await new Promise(r => setTimeout(r, 220));
+            try { await abortableSleep(220, signal);} catch{}
           } else {
             const lines = seg.split("\n");
             for (let i = 0; i < lines.length; i++) {
+              if (signal.aborted) break;
               const line = lines[i]! + (i < lines.length - 1 ? "\n" : "");
               if (line.includes("|") || line.startsWith(">") || line.startsWith("![")) {
                 appendChunk(id, line);
-                await new Promise(r => setTimeout(r, 110));
+                try { await abortableSleep(110, signal);} catch{ break; }
               } else {
                 for (const ch of line) {
+                  if (signal.aborted) break;
                   appendChunk(id, ch);
-                  await new Promise(r => setTimeout(r, 6));
+                  try { await abortableSleep(6, signal);} catch{ break; }
                 }
-                await new Promise(r => setTimeout(r, 18));
+                try { await abortableSleep(18, signal);} catch{}
               }
             }
           }
@@ -132,12 +177,18 @@ async function emitSequence(events: ExecutionEvent[], onEvent: (e: ExecutionEven
       }
     }
     if (ev.event === "final_answer") {
+      if (signal.aborted) break;
       const id = (emitSequence as any)._lastId;
       if (id) setStreaming(id, false);
       setComposerStatus("completed");
     }
-    if (ev.event === "query_completed") { setGlobalStatus("completed"); }
-    await new Promise(r => setTimeout(r, ev.event === "thinking_delta" ? 20 : ev.event === "answer_delta" ? 60 : 280));
+    if (ev.event === "query_completed") { if (!signal.aborted) setGlobalStatus("completed"); }
+    try { await abortableSleep(ev.event === "thinking_delta" ? 20 : ev.event === "answer_delta" ? 60 : 280, signal); } catch { break; }
+  }
+  } catch (e:any) {
+    if (e?.name !== "AbortError") throw e;
+  } finally {
+    if (activeController === controller) activeController = null;
   }
 }
 
@@ -151,6 +202,23 @@ export async function simulateAnalysisQuery(query: string, _ctxRefs: any[]) {
   else if (q === "what changed between these dates?".toLowerCase()) hintEvents = coastalChangeEvents();
   else if (q === "show where built-up area increased".toLowerCase()) hintEvents = coastalChangeEvents();
   else if (q === "compare the optical and sar imagery".toLowerCase()) hintEvents = fusionEvents(query);
+  // Helper to attach LLM-inspired follow-ups (chat-only, clickable)
+  const attachFollowUps = (scenario: string) => {
+    const lastId = (emitSequence as any)._lastId as string | undefined;
+    if (!lastId) return;
+    // LLM may or may not provide follow-ups — 18% chance no follow-ups
+    if (Math.random() < 0.18) return;
+    const map: Record<string, string[]> = {
+      coastal: ["Break down change by sector", "What caused the retreat?", "Show built-up increase alone"],
+      grounding: ["What is near this water body?", "Show confidence breakdown", "Find other water bodies"],
+      fusion: ["Which modality was stronger?", "Show SAR texture alone", "Explain fusion confidence"],
+      vqa: ["Count built-up clusters", "Describe vegetation health", "Where is the settlement?"],
+      crop: ["Zoom to full water body", "What surrounds this structure?", "Estimate its area"],
+    };
+    const qs = map[scenario] ?? ["Tell me more", "Show on map", "Explain confidence"];
+    try { useChatStore.getState().setFollowUpQuestions(lastId, qs.slice(0, 3)); } catch {}
+  };
+
   if (hintEvents) {
     let events = hintEvents;
     const imgContexts = (_ctxRefs || []).filter((c: any) => c.type === "image" || c.type === "aoi" || c.preview);
@@ -159,7 +227,8 @@ export async function simulateAnalysisQuery(query: string, _ctxRefs: any[]) {
         .map((c: any) => {
           if (c.type === "aoi") return `> **AOI attached:** ${c.label} — will be used as spatial filter.\n\n`;
           const alt = c.label || c.fileName || "Attached image";
-          const src = c.preview && String(c.preview).startsWith("blob:") ? c.preview : `image:${c.id || alt.replace(/\s+/g, "-").toLowerCase()}`;
+          // Use real preview (data: or blob: or http) if available, so the *actual uploaded pixels* appear in the chat.
+          const src = c.preview && String(c.preview).length > 10 ? String(c.preview) : `image:${c.id || alt.replace(/\s+/g, "-").toLowerCase()}`;
           return `![${alt}](${src})\n\n*Processing attached image "${alt}" — grounding at correct bbox if requested…*\n\n`;
         })
         .join("\n");
@@ -168,6 +237,9 @@ export async function simulateAnalysisQuery(query: string, _ctxRefs: any[]) {
       else events.splice(events.findIndex((e) => e.event === "answer_delta"), 0, { event: "answer_delta", payload: { chunk: imgBlocks } } as any);
     }
     await emitSequence(events, () => {});
+    // detect scenario for follow-ups
+    const sc = q.includes("water") || q.includes("locate agricultural") ? "grounding" : q.includes("visible") ? "vqa" : q.includes("optical") ? "fusion" : "coastal";
+    attachFollowUps(sc);
     return;
   }
   const hasHistory = useSessionStore.getState().bboxes.length > 0;
@@ -184,15 +256,14 @@ export async function simulateAnalysisQuery(query: string, _ctxRefs: any[]) {
   else if (isFusion) events = fusionEvents(query);
   else events = coastalChangeEvents();
 
-  // If image/AOI contexts were attached, prepend their visualization — use preview blob URL so chat shows inputted image
+  // If image/AOI contexts were attached, prepend their visualization — use real preview so chat shows inputted pixels
   const imgContexts = (_ctxRefs || []).filter((c: any) => c.type === "image" || c.type === "aoi" || c.preview);
   if (imgContexts.length > 0) {
     const imgBlocks = imgContexts
       .map((c: any) => {
         if (c.type === "aoi") return `> **AOI attached:** ${c.label} — will be used as spatial filter.\n\n`;
         const alt = c.label || c.fileName || "Attached image";
-        // prefer actual preview blob URL so frontend can display inputted image directly with bbox overlay
-        const src = c.preview && String(c.preview).startsWith("blob:") ? c.preview : `image:${c.id || alt.replace(/\s+/g, "-").toLowerCase()}`;
+        const src = c.preview && String(c.preview).length > 10 ? String(c.preview) : `image:${c.id || alt.replace(/\s+/g, "-").toLowerCase()}`;
         return `![${alt}](${src})\n\n*Processing attached image "${alt}" — grounding at correct bbox if requested…*\n\n`;
       })
       .join("\n");
@@ -206,6 +277,27 @@ export async function simulateAnalysisQuery(query: string, _ctxRefs: any[]) {
   }
 
   await emitSequence(events, () => {});
+  // attach follow-ups based on chosen scenario
+  let sc2 = "coastal";
+  if (isFollowUpStructure) sc2 = "crop";
+  else if (isVqa && !isGrounding && !isChange && !isFusion) sc2 = "vqa";
+  else if (isGrounding && !isChange) sc2 = "grounding";
+  else if (isFusion) sc2 = "fusion";
+  // reuse helper via lastId
+  {
+    const lastId = (emitSequence as any)._lastId as string | undefined;
+    if (lastId && Math.random() >= 0.18) {
+      const map2: Record<string, string[]> = {
+        coastal: ["Break down change by sector", "What caused the retreat?", "Show built-up increase alone"],
+        grounding: ["What is near this water body?", "Show confidence breakdown", "Find other water bodies"],
+        fusion: ["Which modality was stronger?", "Show SAR texture alone", "Explain fusion confidence"],
+        vqa: ["Count built-up clusters", "Describe vegetation health", "Where is the settlement?"],
+        crop: ["Zoom to full water body", "What surrounds this structure?", "Estimate its area"],
+      };
+      const qs2 = map2[sc2] ?? ["Tell me more", "Show on map"];
+      try { useChatStore.getState().setFollowUpQuestions(lastId, qs2.slice(0, 3)); } catch {}
+    }
+  }
 }
 
 export function getScenarioNames(): string[] {

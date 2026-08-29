@@ -5,9 +5,19 @@ import { useMapStore } from "@/store/map.store";
 
 export function GeoCanvas() {
   const [period, setPeriod] = useState<"24h" | "7d" | "30d">("7d");
-  const [showFlood, setShowFlood] = useState(true);
-  const [showWater, setShowWater] = useState(true);
   const { layers, toggleLayer } = useMapStore();
+  // D3: keep synthetic overlays in sync with global map store (no local divergence)
+  const showFlood = layers.changeMask;
+  const showWater = layers.detections;
+  const setShowFlood = (v: boolean | ((p: boolean) => boolean)) => {
+    const next = typeof v === "function" ? (v as any)(showFlood) : v;
+    if (next !== showFlood) toggleLayer("changeMask");
+  };
+  // legacy setters kept for D3 sync — now directly toggle store
+  const setShowWater = (v: boolean | ((p: boolean) => boolean)) => {
+    const next = typeof v === "function" ? (v as any)(showWater) : v;
+    if (next !== showWater) toggleLayer("detections");
+  };
 
   return (
     <div className="relative h-full rounded-xl overflow-hidden border-0 bg-[#090D14]">
