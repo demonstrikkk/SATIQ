@@ -1,18 +1,97 @@
 version: "3.9"
 
-# Satiq — monorepo compose (skeleton, services to be added)
+# Satiq — monorepo compose (orchestrator pipeline ready)
 services:
-  # frontend:
-  #   build: ./frontend
-  #   ports:
-  #     - "3000:3000"
+  postgres:
+    image: postgis/postgis:15-3.4
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: satiq
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 5
 
-  # gateway:
-  #   build: ./gateway
-  #   ports:
-  #     - "4000:4000"
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
 
-  # orchestrator:
-  #   build: ./orchestrator
-  #   ports:
-  #     - "8000:8000"
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  orchestrator:
+    build: ./orchestrator
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/satiq
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      QWEN_BASE_URL: http://host.docker.internal:11434/v1
+      QWEN_API_KEY: ollama
+      QWEN_MODEL: qwen3.5:9b
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./orchestrator/storage:/app/orchestrator/storage
+
+  gateway:
+    build: ./gateway
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: 4000
+      ORCHESTRATOR_URL: http://orchestrator:8000
+      JWT_SECRET: change-me
+    depends_on:
+      - orchestrator
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - gateway
+
+volumes:
+  pgdata:
+  miniodata:

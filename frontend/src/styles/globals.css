@@ -58,3 +58,177 @@ textarea.composer-input:focus-visible {
 * { scrollbar-width: thin; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── Topo coordinate grid — subtle spatial atmosphere ────────────────── */
+.satiq-topo-grid {
+  background-image:
+    linear-gradient(rgba(6, 182, 212, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(6, 182, 212, 0.025) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── HTML chat polish — conversation radial glow (from satquery-ai.html) ── */
+.satiq-conversation-scroll {
+  background:
+    radial-gradient(ellipse 900px 500px at 50% -10%, rgba(6, 182, 212, 0.05), transparent 60%),
+    #05080F;
+}
+
+/* ── HTML confidence / observations / evidence polish tokens ────────────── */
+.satiq-confidence-track {
+  background: #141F30;
+}
+.satiq-evidence-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  background: rgba(51, 65, 85, 0.35);
+}
+@media (max-width: 860px) {
+  .satiq-evidence-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Star twinkle ────────────────────────────────────────────────────── */
+.star-twinkle {
+  animation: twinkle 9s ease-in-out infinite alternate;
+}
+@keyframes twinkle {
+  0% { opacity: 0.12; }
+  100% { opacity: 0.36; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .star-twinkle { animation: none; opacity: 0.18; }
+}
+
+/* ── Typing indicator dots ───────────────────────────────────────────── */
+.typing-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #06B6D4;
+  animation: typing-bounce 1.3s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.18s; }
+.typing-dot:nth-child(3) { animation-delay: 0.36s; }
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+
+/* ── Satellite beam sweep — smooth cone from satellite down and back ─────
+@keyframes beamSweep {
+  0% { transform: translateY(-28%); opacity: 0.0; }
+  15% { opacity: 1; }
+  50% { transform: translateY(0%); opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateY(28%); opacity: 0.0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes beamSweep { 0%,100% { transform: none; opacity: 0.4; } }
+}
+
+/* ── Earth circular orbit — smooth revolving, not spinning ─────────────── */
+/* @keyframes earthOrbit {
+  0% { transform: translate(-50%, 72%) translateX(0px) translateY(0px); }
+  25% { transform: translate(-50%, 72%) translateX(14px) translateY(-7px); }
+  50% { transform: translate(-50%, 72%) translateX(0px) translateY(-12px); }
+  75% { transform: translate(-50%, 72%) translateX(-14px) translateY(-7px); }
+  100% { transform: translate(-50%, 72%) translateX(0px) translateY(0px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes earthOrbit { 0%,100% { transform: translate(-50%, 72%); } }
+}  */
+/* ── Star twinkling (if not defined elsewhere) ── */
+.star-twinkle {
+  animation: twinkle 3s ease-in-out infinite alternate;
+}
+
+@keyframes twinkle {
+  0% {
+    opacity: 0.4;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+/* ── Topo grid (if not defined elsewhere) ── */
+.satiq-topo-grid {
+  background-image:
+    linear-gradient(rgba(6, 182, 212, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(6, 182, 212, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: -1px -1px;
+}
+
+/* ── Satellite beam sweep ── */
+@keyframes beamSweep {
+  0% {
+    transform: translateY(-28%);
+    opacity: 0;
+  }
+
+  15% {
+    opacity: 1;
+  }
+
+  50% {
+    transform: translateY(0%);
+    opacity: 1;
+  }
+
+  85% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(28%);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes beamSweep {
+
+    0%,
+    100% {
+      transform: none;
+      opacity: 0.4;
+    }
+  }
+}
+
+/* ── Earth orbit ── */
+@keyframes earthOrbit {
+  0% {
+    transform: translate(-50%, 72%) translateX(0px) translateY(0px);
+  }
+
+  25% {
+    transform: translate(-50%, 72%) translateX(14px) translateY(-7px);
+  }
+
+  50% {
+    transform: translate(-50%, 72%) translateX(0px) translateY(-12px);
+  }
+
+  75% {
+    transform: translate(-50%, 72%) translateX(-14px) translateY(-7px);
+  }
+
+  100% {
+    transform: translate(-50%, 72%) translateX(0px) translateY(0px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes earthOrbit {
+
+    0%,
+    100% {
+      transform: translate(-50%, 72%);
+    }
+  }
+}

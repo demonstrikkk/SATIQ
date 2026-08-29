@@ -1,0 +1,5405 @@
+{
+  "header": {
+    "generated_at": "2026-08-29T10:40:37Z",
+    "provider": "groq",
+    "has_local_qwen": false,
+    "llm_provider_setting": "groq",
+    "mock_qwen": false,
+    "models": {
+      "qwen": "qwen3.5:9b",
+      "groq": "qwen/qwen3.6-27b",
+      "groq_router": "groq/compound-mini",
+      "stt": "whisper-large-v3"
+    },
+    "voice_enabled": true,
+    "note": "Complete pipeline response \u2014 each case includes full GraphState + final_result + execution_trace. Dummy vision (768/1024-d) swappable in dummy/*. See orchestrator/README.md"
+  },
+  "cases": [
+    {
+      "case": "vqa_open",
+      "expected_task": "vqa",
+      "sensor": "Sentinel-2",
+      "input": {
+        "session_id": "complete_demo_00_vqa_open",
+        "query": "Describe the land-cover and major objects visible in this image.",
+        "assets": [
+          {
+            "asset_id": "img_001",
+            "modality": "optical",
+            "crs": "EPSG:32617",
+            "gsd": 10.0,
+            "bbox": [
+              0,
+              0,
+              512,
+              512
+            ],
+            "bands": [
+              "B02",
+              "B03",
+              "B04",
+              "B08"
+            ]
+          }
+        ],
+        "image_ids": [
+          "img_001"
+        ]
+      },
+      "routing": {
+        "task_type": "vqa",
+        "query_analysis": {
+          "temporal": {
+            "has_before_after": false,
+            "has_dates": false,
+            "has_change_verb": false,
+            "date_mentions": [],
+            "is_temporal": false
+          },
+          "spatial": {
+            "has_bbox_mention": false,
+            "has_region_name": false,
+            "region": null,
+            "has_spatial": false
+          },
+          "comparison": {
+            "is_comparison": false,
+            "entities": []
+          }
+        },
+        "is_followup": false,
+        "followup_anchor": null,
+        "followup_resolved": false
+      },
+      "plan": {
+        "task_type": "vqa",
+        "reasoning": "The query requests a description of land-cover and major objects from a single optical image. The provided asset (img_001) is a standard RGB+NIR optical image with sufficient resolution (10m GSD) for this type of visual analysis. No multi-sensor fusion or temporal comparison is required as the task is strictly spatial and based on a single frame.",
+        "required_assets": [
+          "img_001"
+        ],
+        "fusion_needed": false,
+        "temporal_needed": false,
+        "confidence": 0.95,
+        "_provider": "groq",
+        "_model": "qwen/qwen3.6-27b",
+        "requires_coreg": false,
+        "tile_config": {
+          "enabled": true,
+          "size": 256,
+          "overlap_px": 32
+        },
+        "data_requirements": {
+          "temporal": "single",
+          "bands": [
+            "B2",
+            "B3",
+            "B4"
+          ],
+          "sar_pol": null
+        },
+        "steps": [
+          "preprocessing",
+          "vision_encoder",
+          "fusion",
+          "task_agent"
+        ],
+        "fusion_method": "late",
+        "sub_queries": null,
+        "spatial_aggregation": null
+      },
+      "region_of_interest": null,
+      "sub_queries": null,
+      "encoder": "satmae",
+      "coreg": {
+        "ssim": 1.0,
+        "residual": 0.0,
+        "method": "dummy_affine",
+        "passed": true,
+        "num_tiles": 1
+      },
+      "coreg_passed": true,
+      "requires_coreg": false,
+      "spectral_indices": null,
+      "tiles": [
+        {
+          "tile_id": "img_001_tile_0",
+          "asset_id": "img_001",
+          "bbox": [
+            0,
+            0,
+            512,
+            512
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000041.3827717
+        }
+      ],
+      "embeddings_meta": {
+        "satmae": {
+          "count": 1,
+          "dim": 1024
+        }
+      },
+      "fused_repr_meta": {
+        "fusion_method": "attention",
+        "confidence": 0.86,
+        "dim": 768
+      },
+      "task_output": {
+        "task": "vqa",
+        "query": "Describe the land-cover and major objects visible in this image.",
+        "image_id": "img_001",
+        "answer_text": "The image shows a mix of agricultural fields in the center, a small settlement cluster to the east, and a forested patch along the western edge.",
+        "answer_type": "open",
+        "answer_short": null,
+        "confidence": 0.83,
+        "spatial_bbox": null,
+        "answer_numeric": null,
+        "answer_unit": null,
+        "answer_temporal_ref": null,
+        "per_tile_confidence": {
+          "img_001_tile_0": 0.877
+        },
+        "attention_maps": null,
+        "caption_text": null,
+        "key_objects": [
+          "agricultural fields",
+          "settlement",
+          "forest"
+        ]
+      },
+      "final_result": {
+        "task": "vqa",
+        "query": "Describe the land-cover and major objects visible in this image.",
+        "image_id": "img_001",
+        "answer_text": "\n<think>\nThinking Process:\n\n1.  **Deconstruct the Input:**\n    *   Query: \"Describe the land-cover and major objects visible in this image.\"\n    *   Task Output: JSON object containing:\n        *   `answer_text`: \"The image shows a mix of agricultural fields in the center, a small settlement cluster to the east, and a forested patch along the western edge.\"\n        *   `confidence`: 0.83\n        *   `key_objects`: [\"agricultural fields\", \"settlement\", \"forest\"]\n        *   `spatial_bbox`: null\n        *   `execution_trace`: Shows successful processing, single image, VQA task, confidence 0.83.\n\n2.  **Synthesize the Answer:**\n    *   *Goal:* Write a concise markdown answer.\n    *   *Requirements:* Include confidence, bbox if present, evidence summary. Keep under 400 words.\n    *   *Content:*\n        *   Land-cover/Objects: Agricultural fields (center), settlement cluster (east), forested patch (west).\n        *   Confidence: 0.83.\n        *   Bbox: None (`null`).\n        *   Evidence: The model identified these features based on the visual analysis of `img_001`.\n\n3.  **Draft the Response:**\n    *   *Structure:*\n        ```markdown\n        **Land-Cover and Major Objects**\n\n        The image displays the following features:\n        *   **Agricultural Fields:** Located in the center of the image.\n        *   **Settlement:** A small cluster is visible to the east.\n        *   **Forest:** A forested patch runs along the western edge.\n\n        **Metadata**\n        *   **Confidence:** 0.83\n        *   **Bounding Box:** None provided.\n        *   **Evidence:** Analysis of `img_001` identified key objects including agricultural fields, a settlement, and forest cover.\n        ```\n\n4.  **Review and Refine:**\n    *   *Word Count Check:* The draft is well under 400 words.\n    *   *Conciseness:* The draft is concise.\n    *   *Requirements Check:*\n        *   Confidence included? Yes (0.83).\n        *   Bbox included? Yes (Noted as None).\n        *   Evidence summary included? Yes.\n        *   Markdown format? Yes.\n    *   *Polishing:* The structure looks good. The evidence summary can be slightly more descriptive based on the `key_objects` and `answer_text`.\n\n    *   *Revised Draft:*\n        ```markdown\n        ### Land-Cover and Major Objects\n\n        The image reveals a heterogeneous landscape characterized by three primary features:",
+        "answer_type": "open",
+        "answer_short": null,
+        "confidence": 0.83,
+        "spatial_bbox": null,
+        "answer_numeric": null,
+        "answer_unit": null,
+        "answer_temporal_ref": null,
+        "per_tile_confidence": {
+          "img_001_tile_0": 0.877
+        },
+        "attention_maps": null,
+        "caption_text": null,
+        "key_objects": [
+          "agricultural fields",
+          "settlement",
+          "forest"
+        ],
+        "execution_trace": [
+          {
+            "agent": "input_validator",
+            "status": "ok",
+            "detail": {
+              "query_len": 64,
+              "num_assets": 1
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "router",
+            "status": "ok",
+            "detail": {
+              "task_type": "vqa",
+              "raw": {
+                "task_type": "vqa",
+                "reasoning": "Groq qwen groq/compound-mini single-word",
+                "confidence": 0.9,
+                "_provider": "groq",
+                "_model": "groq/compound-mini"
+              }
+            },
+            "latency_ms": 1478
+          },
+          {
+            "agent": "planner",
+            "status": "ok",
+            "detail": {
+              "plan": {
+                "task_type": "vqa",
+                "reasoning": "The query requests a description of land-cover and major objects from a single optical image. The provided asset (img_001) is a standard RGB+NIR optical image with sufficient resolution (10m GSD) for this type of visual analysis. No multi-sensor fusion or temporal comparison is required as the task is strictly spatial and based on a single frame.",
+                "required_assets": [
+                  "img_001"
+                ],
+                "fusion_needed": false,
+                "temporal_needed": false,
+                "confidence": 0.95,
+                "_provider": "groq",
+                "_model": "qwen/qwen3.6-27b",
+                "requires_coreg": false,
+                "tile_config": {
+                  "enabled": true,
+                  "size": 256,
+                  "overlap_px": 32
+                },
+                "data_requirements": {
+                  "temporal": "single",
+                  "bands": [
+                    "B2",
+                    "B3",
+                    "B4"
+                  ],
+                  "sar_pol": null
+                },
+                "steps": [
+                  "preprocessing",
+                  "vision_encoder",
+                  "fusion",
+                  "task_agent"
+                ],
+                "fusion_method": "late",
+                "sub_queries": null,
+                "spatial_aggregation": null
+              },
+              "requires_coreg": false,
+              "sub_queries": null,
+              "region": null
+            },
+            "latency_ms": 2465
+          },
+          {
+            "agent": "preprocessing",
+            "status": "ok",
+            "detail": {
+              "num_tiles": 1,
+              "coreg": {
+                "ssim": 1.0,
+                "residual": 0.0,
+                "method": "dummy_affine",
+                "passed": true,
+                "num_tiles": 1
+              },
+              "gsd_normalized": 10.0,
+              "spectral": {},
+              "roi": null
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_selector",
+            "status": "ok",
+            "detail": {
+              "encoder": "satmae",
+              "modalities": [
+                "optical"
+              ],
+              "task": "vqa"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_compat",
+            "status": "ok",
+            "detail": {
+              "encoder": "satmae",
+              "requires_coreg": false,
+              "band_reports": [
+                {
+                  "asset_id": "img_001",
+                  "bands": [
+                    "B02",
+                    "B03",
+                    "B04",
+                    "B08"
+                  ],
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": true,
+                  "note": ""
+                }
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "coreg_gate",
+            "status": "skipped",
+            "detail": {
+              "reason": "requires_coreg=false (single-image VQA/grounding/captioning) bypass",
+              "task_type": "vqa"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "vision_encoder",
+            "status": "ok",
+            "detail": {
+              "encoder": "satmae",
+              "num_tiles": 1,
+              "embed_keys": [
+                "satmae"
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "fusion",
+            "status": "ok",
+            "detail": {
+              "method": "attention",
+              "confidence": 0.86,
+              "dim": 768
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "task_agent",
+            "status": "ok",
+            "detail": {
+              "task": "vqa",
+              "confidence": 0.83,
+              "sub_queries": 0,
+              "has_numeric": false
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "tile_manager",
+            "status": "ok",
+            "detail": {
+              "counts": {
+                "pending": 0,
+                "done": 1,
+                "failed": 0
+              },
+              "num_tiles": 1
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "post_processing",
+            "status": "ok",
+            "detail": {
+              "confidence": 0.83,
+              "has_chart": true,
+              "stitched": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "response_composer",
+            "status": "ok",
+            "detail": {
+              "composed_len": 2361,
+              "followups": 3,
+              "version": 1
+            },
+            "latency_ms": 1543
+          }
+        ],
+        "crs": "EPSG:4326",
+        "bbox_wgs84": [
+          0,
+          0,
+          512,
+          512
+        ],
+        "acquisition_dates": [],
+        "coreg_passed": true,
+        "encoder_used": "satmae",
+        "fusion_method": "late",
+        "chart_spec": {
+          "type": "donut",
+          "title": "Land-cover confidence",
+          "data": [
+            {
+              "name": "Agricultural Fields",
+              "value": 0.83
+            },
+            {
+              "name": "Settlement",
+              "value": 0.71
+            },
+            {
+              "name": "Forest",
+              "value": 0.59
+            }
+          ],
+          "unit": "%",
+          "note": "RS-VQA \u2022 data-driven"
+        },
+        "output_format": "json",
+        "composed_by": "qwen3.5-9b",
+        "chart_prompt_fragment": "CHART RULES \u2014 if your answer contains numbers, emit ONE ```chart block after the narrative, before the table:\n- Type: bar (default) / donut for 2-4 proportional slices / area|line for temporal / radia...",
+        "followup_suggestions": [
+          "Count the built-up clusters?",
+          "Where is water relative to forest?",
+          "Generate a GeoJSON for this land-cover?"
+        ],
+        "confidence_explanation": "Moderate confidence \u2014 some ambiguity in tile evidence; coreg passed (SSIM\u22650.75); encoder satmae.",
+        "composer_version": 1,
+        "_session_id": "complete_demo_00_vqa_open"
+      },
+      "execution_trace": [
+        {
+          "agent": "input_validator",
+          "status": "ok",
+          "detail": {
+            "query_len": 64,
+            "num_assets": 1
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "router",
+          "status": "ok",
+          "detail": {
+            "task_type": "vqa",
+            "raw": {
+              "task_type": "vqa",
+              "reasoning": "Groq qwen groq/compound-mini single-word",
+              "confidence": 0.9,
+              "_provider": "groq",
+              "_model": "groq/compound-mini"
+            }
+          },
+          "latency_ms": 1478
+        },
+        {
+          "agent": "planner",
+          "status": "ok",
+          "detail": {
+            "plan": {
+              "task_type": "vqa",
+              "reasoning": "The query requests a description of land-cover and major objects from a single optical image. The provided asset (img_001) is a standard RGB+NIR optical image with sufficient resolution (10m GSD) for this type of visual analysis. No multi-sensor fusion or temporal comparison is required as the task is strictly spatial and based on a single frame.",
+              "required_assets": [
+                "img_001"
+              ],
+              "fusion_needed": false,
+              "temporal_needed": false,
+              "confidence": 0.95,
+              "_provider": "groq",
+              "_model": "qwen/qwen3.6-27b",
+              "requires_coreg": false,
+              "tile_config": {
+                "enabled": true,
+                "size": 256,
+                "overlap_px": 32
+              },
+              "data_requirements": {
+                "temporal": "single",
+                "bands": [
+                  "B2",
+                  "B3",
+                  "B4"
+                ],
+                "sar_pol": null
+              },
+              "steps": [
+                "preprocessing",
+                "vision_encoder",
+                "fusion",
+                "task_agent"
+              ],
+              "fusion_method": "late",
+              "sub_queries": null,
+              "spatial_aggregation": null
+            },
+            "requires_coreg": false,
+            "sub_queries": null,
+            "region": null
+          },
+          "latency_ms": 2465
+        },
+        {
+          "agent": "preprocessing",
+          "status": "ok",
+          "detail": {
+            "num_tiles": 1,
+            "coreg": {
+              "ssim": 1.0,
+              "residual": 0.0,
+              "method": "dummy_affine",
+              "passed": true,
+              "num_tiles": 1
+            },
+            "gsd_normalized": 10.0,
+            "spectral": {},
+            "roi": null
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_selector",
+          "status": "ok",
+          "detail": {
+            "encoder": "satmae",
+            "modalities": [
+              "optical"
+            ],
+            "task": "vqa"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_compat",
+          "status": "ok",
+          "detail": {
+            "encoder": "satmae",
+            "requires_coreg": false,
+            "band_reports": [
+              {
+                "asset_id": "img_001",
+                "bands": [
+                  "B02",
+                  "B03",
+                  "B04",
+                  "B08"
+                ],
+                "available": true,
+                "missing": [],
+                "substitute_possible": true,
+                "note": ""
+              }
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "coreg_gate",
+          "status": "skipped",
+          "detail": {
+            "reason": "requires_coreg=false (single-image VQA/grounding/captioning) bypass",
+            "task_type": "vqa"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "vision_encoder",
+          "status": "ok",
+          "detail": {
+            "encoder": "satmae",
+            "num_tiles": 1,
+            "embed_keys": [
+              "satmae"
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "fusion",
+          "status": "ok",
+          "detail": {
+            "method": "attention",
+            "confidence": 0.86,
+            "dim": 768
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "task_agent",
+          "status": "ok",
+          "detail": {
+            "task": "vqa",
+            "confidence": 0.83,
+            "sub_queries": 0,
+            "has_numeric": false
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "tile_manager",
+          "status": "ok",
+          "detail": {
+            "counts": {
+              "pending": 0,
+              "done": 1,
+              "failed": 0
+            },
+            "num_tiles": 1
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "post_processing",
+          "status": "ok",
+          "detail": {
+            "confidence": 0.83,
+            "has_chart": true,
+            "stitched": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "response_composer",
+          "status": "ok",
+          "detail": {
+            "composed_len": 2361,
+            "followups": 3,
+            "version": 1
+          },
+          "latency_ms": 1543
+        }
+      ],
+      "error_log": [],
+      "elapsed_s": 5.563
+    },
+    {
+      "case": "grounding",
+      "expected_task": "grounding",
+      "sensor": null,
+      "input": {
+        "session_id": "complete_demo_01_grounding",
+        "query": "Locate the water body in the northern sector",
+        "assets": [
+          {
+            "asset_id": "img_001",
+            "modality": "optical",
+            "crs": "EPSG:32617",
+            "bands": [
+              "B02",
+              "B03",
+              "B04"
+            ]
+          }
+        ],
+        "image_ids": [
+          "img_001"
+        ]
+      },
+      "routing": {
+        "task_type": "grounding",
+        "query_analysis": {
+          "temporal": {
+            "has_before_after": false,
+            "has_dates": false,
+            "has_change_verb": false,
+            "date_mentions": [],
+            "is_temporal": false
+          },
+          "spatial": {
+            "has_bbox_mention": false,
+            "has_region_name": true,
+            "region": "Locate",
+            "has_spatial": true
+          },
+          "comparison": {
+            "is_comparison": false,
+            "entities": []
+          }
+        },
+        "is_followup": false,
+        "followup_anchor": null,
+        "followup_resolved": false
+      },
+      "plan": {
+        "task_type": "grounding",
+        "reasoning": "The query requires spatial grounding of a water body within a specific region (northern sector). The provided optical asset (img_001) contains visible spectrum bands (B02, B03, B04) suitable for spectral and visual identification of water features. The EPSG:32617 CRS allows precise spatial cropping to the northern sector. No multi-modal fusion or temporal analysis is required for this static spatial localization task.",
+        "required_assets": [
+          "img_001"
+        ],
+        "fusion_needed": false,
+        "temporal_needed": false,
+        "confidence": 0.95,
+        "_provider": "groq",
+        "_model": "qwen/qwen3.6-27b",
+        "requires_coreg": false,
+        "tile_config": {
+          "enabled": true,
+          "size": 256,
+          "overlap_px": 32
+        },
+        "data_requirements": {
+          "temporal": "single",
+          "bands": [
+            "B2",
+            "B3",
+            "B4"
+          ],
+          "sar_pol": null
+        },
+        "steps": [
+          "preprocessing",
+          "vision_encoder",
+          "fusion",
+          "task_agent"
+        ],
+        "fusion_method": "late",
+        "sub_queries": null,
+        "spatial_aggregation": null
+      },
+      "region_of_interest": null,
+      "sub_queries": null,
+      "encoder": "satmae",
+      "coreg": {
+        "ssim": 1.0,
+        "residual": 0.0,
+        "method": "dummy_affine",
+        "passed": true,
+        "num_tiles": 1
+      },
+      "coreg_passed": true,
+      "requires_coreg": false,
+      "spectral_indices": null,
+      "tiles": [
+        {
+          "tile_id": "img_001_tile_0",
+          "asset_id": "img_001",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000045.6699562
+        }
+      ],
+      "embeddings_meta": {
+        "satmae": {
+          "count": 1,
+          "dim": 1024
+        }
+      },
+      "fused_repr_meta": {
+        "fusion_method": "attention",
+        "confidence": 0.86,
+        "dim": 768
+      },
+      "task_output": {
+        "task": "grounding",
+        "query": "Locate the water body in the northern sector",
+        "image_id": "img_001",
+        "answer_text": "Water body detected in the northern sector with confidence 0.89. BBox (normalized) [0.166, 0.076, 0.456, 0.406] corresponds to xyxy [120, 45, 310, 210].",
+        "bbox_normalized": [
+          0.166,
+          0.076,
+          0.456,
+          0.406
+        ],
+        "bbox_xyxy": [
+          120,
+          45,
+          310,
+          210
+        ],
+        "bbox": [
+          0.166,
+          0.076,
+          0.456,
+          0.406
+        ],
+        "bbox_list": [
+          [
+            120,
+            45,
+            310,
+            210
+          ]
+        ],
+        "phrase_grounding_map": {
+          "water body": [
+            [
+              120,
+              45,
+              310,
+              210
+            ]
+          ]
+        },
+        "mask_rle": null,
+        "confidence": 0.89,
+        "detections": 1,
+        "status": "OK",
+        "answer_numeric": 1.0,
+        "answer_unit": "count",
+        "per_tile_confidence": {
+          "img_001_tile_0": 0.89
+        },
+        "attention_maps": null
+      },
+      "final_result": {
+        "task": "grounding",
+        "query": "Locate the water body in the northern sector",
+        "image_id": "img_001",
+        "answer_text": "\n<think>\nHere's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Role:** Satiq's response composer. Fuse tool outputs into final answer.\n   - **Query:** Locate the water body in the northern sector\n   - **Task Output:** JSON containing grounding results for image `img_001`.\n     - `answer_text`: \"Water body detected in the northern sector with confidence 0.89. BBox (normalized) [0.166, 0.076, 0.456, 0.406] corresponds to xyxy [120, 45, 310, 210].\"\n     - `bbox_normalized`: [0.166, 0.076, 0.456, 0.406]\n     - `bbox_xyxy`: [120, 45, 310, 210]\n     - `confidence`: 0.89\n     - `status`: \"OK\"\n     - `execution_trace`: Shows successful routing, planning, vision encoding, fusion, and task execution.\n   - **Constraints:** Write concise markdown answer with > confidence, bbox if present, and evidence summary. Keep under 400 words.\n\n2.  **Extract Key Information:**\n   - **Confidence:** 0.89 (89%)\n   - **Bounding Box:** Normalized `[0.166, 0.076, 0.456, 0.406]` / Pixel `[120, 45, 310, 210]` (xyxy format)\n   - **Location:** Northern sector of `img_001`\n   - **Evidence/Reasoning:** The system used optical bands (B02, B03, B04) from `img_001` with EPSG:32617 CRS for precise spatial cropping. Vision encoder (SatMAE) and attention-based fusion confirmed the detection. Single-tile processing was sufficient.\n\n3.  **Draft Response (Mental Refinement):**\n   **Detection Result:**\n   A water body has been successfully located in the northern sector of `img_001`.\n   - **Confidence:** 89% (>0.89)\n   - **Bounding Box:** `[120, 45, 310, 210]` (xyxy pixel coordinates) | Normalized: `[0.166, 0.076, 0.456, 0.406]`\n   \n   **Evidence Summary:**\n   The grounding task leveraged visible spectrum",
+        "bbox_normalized": [
+          0.166,
+          0.076,
+          0.456,
+          0.406
+        ],
+        "bbox_xyxy": [
+          120,
+          45,
+          310,
+          210
+        ],
+        "bbox": [
+          0.166,
+          0.076,
+          0.456,
+          0.406
+        ],
+        "bbox_list": [
+          [
+            120,
+            45,
+            310,
+            210
+          ]
+        ],
+        "phrase_grounding_map": {
+          "water body": [
+            [
+              120,
+              45,
+              310,
+              210
+            ]
+          ]
+        },
+        "mask_rle": null,
+        "confidence": 0.89,
+        "detections": 1,
+        "status": "OK",
+        "answer_numeric": 1.0,
+        "answer_unit": "count",
+        "per_tile_confidence": {
+          "img_001_tile_0": 0.89
+        },
+        "attention_maps": null,
+        "execution_trace": [
+          {
+            "agent": "input_validator",
+            "status": "ok",
+            "detail": {
+              "query_len": 44,
+              "num_assets": 1
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "router",
+            "status": "ok",
+            "detail": {
+              "task_type": "grounding",
+              "raw": {
+                "task_type": "grounding",
+                "reasoning": "Groq qwen groq/compound-mini single-word",
+                "confidence": 0.9,
+                "_provider": "groq",
+                "_model": "groq/compound-mini"
+              }
+            },
+            "latency_ms": 910
+          },
+          {
+            "agent": "planner",
+            "status": "ok",
+            "detail": {
+              "plan": {
+                "task_type": "grounding",
+                "reasoning": "The query requires spatial grounding of a water body within a specific region (northern sector). The provided optical asset (img_001) contains visible spectrum bands (B02, B03, B04) suitable for spectral and visual identification of water features. The EPSG:32617 CRS allows precise spatial cropping to the northern sector. No multi-modal fusion or temporal analysis is required for this static spatial localization task.",
+                "required_assets": [
+                  "img_001"
+                ],
+                "fusion_needed": false,
+                "temporal_needed": false,
+                "confidence": 0.95,
+                "_provider": "groq",
+                "_model": "qwen/qwen3.6-27b",
+                "requires_coreg": false,
+                "tile_config": {
+                  "enabled": true,
+                  "size": 256,
+                  "overlap_px": 32
+                },
+                "data_requirements": {
+                  "temporal": "single",
+                  "bands": [
+                    "B2",
+                    "B3",
+                    "B4"
+                  ],
+                  "sar_pol": null
+                },
+                "steps": [
+                  "preprocessing",
+                  "vision_encoder",
+                  "fusion",
+                  "task_agent"
+                ],
+                "fusion_method": "late",
+                "sub_queries": null,
+                "spatial_aggregation": null
+              },
+              "requires_coreg": false,
+              "sub_queries": null,
+              "region": null
+            },
+            "latency_ms": 1815
+          },
+          {
+            "agent": "preprocessing",
+            "status": "ok",
+            "detail": {
+              "num_tiles": 1,
+              "coreg": {
+                "ssim": 1.0,
+                "residual": 0.0,
+                "method": "dummy_affine",
+                "passed": true,
+                "num_tiles": 1
+              },
+              "gsd_normalized": 10.0,
+              "spectral": {},
+              "roi": null
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_selector",
+            "status": "ok",
+            "detail": {
+              "encoder": "satmae",
+              "modalities": [
+                "optical"
+              ],
+              "task": "grounding"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_compat",
+            "status": "ok",
+            "detail": {
+              "encoder": "satmae",
+              "requires_coreg": false,
+              "band_reports": [
+                {
+                  "asset_id": "img_001",
+                  "bands": [
+                    "B02",
+                    "B03",
+                    "B04"
+                  ],
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": true,
+                  "note": ""
+                }
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "coreg_gate",
+            "status": "skipped",
+            "detail": {
+              "reason": "requires_coreg=false (single-image VQA/grounding/captioning) bypass",
+              "task_type": "grounding"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "vision_encoder",
+            "status": "ok",
+            "detail": {
+              "encoder": "satmae",
+              "num_tiles": 1,
+              "embed_keys": [
+                "satmae"
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "fusion",
+            "status": "ok",
+            "detail": {
+              "method": "attention",
+              "confidence": 0.86,
+              "dim": 768
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "task_agent",
+            "status": "ok",
+            "detail": {
+              "task": "grounding",
+              "confidence": 0.89,
+              "sub_queries": 0,
+              "has_numeric": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "tile_manager",
+            "status": "ok",
+            "detail": {
+              "counts": {
+                "pending": 0,
+                "done": 1,
+                "failed": 0
+              },
+              "num_tiles": 1
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "post_processing",
+            "status": "ok",
+            "detail": {
+              "confidence": 0.89,
+              "has_chart": true,
+              "stitched": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "response_composer",
+            "status": "ok",
+            "detail": {
+              "composed_len": 1697,
+              "followups": 3,
+              "version": 1
+            },
+            "latency_ms": 9810
+          }
+        ],
+        "crs": "EPSG:4326",
+        "acquisition_dates": [],
+        "coreg_passed": true,
+        "encoder_used": "satmae",
+        "fusion_method": "late",
+        "chart_spec": {
+          "type": "bar",
+          "title": "Detection confidence",
+          "data": [
+            {
+              "name": "Target",
+              "value": 0.89
+            },
+            {
+              "name": "Background",
+              "value": 0.11
+            }
+          ],
+          "unit": "confidence",
+          "note": "Grounding"
+        },
+        "output_format": "json",
+        "composed_by": "qwen3.5-9b",
+        "chart_prompt_fragment": "CHART RULES \u2014 if your answer contains numbers, emit ONE ```chart block after the narrative, before the table:\n- Type: bar (default) / donut for 2-4 proportional slices / area|line for temporal / radia...",
+        "followup_suggestions": [
+          "What is the area of this bbox in ha?",
+          "Show attention heatmap for this grounding?",
+          "Crop to this bbox and re-run VQA?"
+        ],
+        "confidence_explanation": "High confidence based on clear spectral contrast; coreg passed (SSIM\u22650.75); encoder satmae.",
+        "composer_version": 1,
+        "_session_id": "complete_demo_01_grounding"
+      },
+      "execution_trace": [
+        {
+          "agent": "input_validator",
+          "status": "ok",
+          "detail": {
+            "query_len": 44,
+            "num_assets": 1
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "router",
+          "status": "ok",
+          "detail": {
+            "task_type": "grounding",
+            "raw": {
+              "task_type": "grounding",
+              "reasoning": "Groq qwen groq/compound-mini single-word",
+              "confidence": 0.9,
+              "_provider": "groq",
+              "_model": "groq/compound-mini"
+            }
+          },
+          "latency_ms": 910
+        },
+        {
+          "agent": "planner",
+          "status": "ok",
+          "detail": {
+            "plan": {
+              "task_type": "grounding",
+              "reasoning": "The query requires spatial grounding of a water body within a specific region (northern sector). The provided optical asset (img_001) contains visible spectrum bands (B02, B03, B04) suitable for spectral and visual identification of water features. The EPSG:32617 CRS allows precise spatial cropping to the northern sector. No multi-modal fusion or temporal analysis is required for this static spatial localization task.",
+              "required_assets": [
+                "img_001"
+              ],
+              "fusion_needed": false,
+              "temporal_needed": false,
+              "confidence": 0.95,
+              "_provider": "groq",
+              "_model": "qwen/qwen3.6-27b",
+              "requires_coreg": false,
+              "tile_config": {
+                "enabled": true,
+                "size": 256,
+                "overlap_px": 32
+              },
+              "data_requirements": {
+                "temporal": "single",
+                "bands": [
+                  "B2",
+                  "B3",
+                  "B4"
+                ],
+                "sar_pol": null
+              },
+              "steps": [
+                "preprocessing",
+                "vision_encoder",
+                "fusion",
+                "task_agent"
+              ],
+              "fusion_method": "late",
+              "sub_queries": null,
+              "spatial_aggregation": null
+            },
+            "requires_coreg": false,
+            "sub_queries": null,
+            "region": null
+          },
+          "latency_ms": 1815
+        },
+        {
+          "agent": "preprocessing",
+          "status": "ok",
+          "detail": {
+            "num_tiles": 1,
+            "coreg": {
+              "ssim": 1.0,
+              "residual": 0.0,
+              "method": "dummy_affine",
+              "passed": true,
+              "num_tiles": 1
+            },
+            "gsd_normalized": 10.0,
+            "spectral": {},
+            "roi": null
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_selector",
+          "status": "ok",
+          "detail": {
+            "encoder": "satmae",
+            "modalities": [
+              "optical"
+            ],
+            "task": "grounding"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_compat",
+          "status": "ok",
+          "detail": {
+            "encoder": "satmae",
+            "requires_coreg": false,
+            "band_reports": [
+              {
+                "asset_id": "img_001",
+                "bands": [
+                  "B02",
+                  "B03",
+                  "B04"
+                ],
+                "available": true,
+                "missing": [],
+                "substitute_possible": true,
+                "note": ""
+              }
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "coreg_gate",
+          "status": "skipped",
+          "detail": {
+            "reason": "requires_coreg=false (single-image VQA/grounding/captioning) bypass",
+            "task_type": "grounding"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "vision_encoder",
+          "status": "ok",
+          "detail": {
+            "encoder": "satmae",
+            "num_tiles": 1,
+            "embed_keys": [
+              "satmae"
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "fusion",
+          "status": "ok",
+          "detail": {
+            "method": "attention",
+            "confidence": 0.86,
+            "dim": 768
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "task_agent",
+          "status": "ok",
+          "detail": {
+            "task": "grounding",
+            "confidence": 0.89,
+            "sub_queries": 0,
+            "has_numeric": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "tile_manager",
+          "status": "ok",
+          "detail": {
+            "counts": {
+              "pending": 0,
+              "done": 1,
+              "failed": 0
+            },
+            "num_tiles": 1
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "post_processing",
+          "status": "ok",
+          "detail": {
+            "confidence": 0.89,
+            "has_chart": true,
+            "stitched": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "response_composer",
+          "status": "ok",
+          "detail": {
+            "composed_len": 1697,
+            "followups": 3,
+            "version": 1
+          },
+          "latency_ms": 9810
+        }
+      ],
+      "error_log": [],
+      "elapsed_s": 12.557
+    },
+    {
+      "case": "change_vqa",
+      "expected_task": "change_vqa",
+      "sensor": "Sentinel-2 bi-temporal",
+      "input": {
+        "session_id": "complete_demo_02_change_vqa",
+        "query": "What changed between these two dates, and where?",
+        "assets": [
+          {
+            "asset_id": "img_2021",
+            "modality": "optical",
+            "crs": "EPSG:32617",
+            "gsd": 10.0,
+            "bands": [
+              "B02",
+              "B03",
+              "B04",
+              "B08"
+            ]
+          },
+          {
+            "asset_id": "img_2023",
+            "modality": "optical",
+            "crs": "EPSG:32617",
+            "gsd": 10.0,
+            "bands": [
+              "B02",
+              "B03",
+              "B04",
+              "B08"
+            ]
+          }
+        ],
+        "image_ids": [
+          "img_2021",
+          "img_2023"
+        ]
+      },
+      "routing": {
+        "task_type": "change_vqa",
+        "query_analysis": {
+          "temporal": {
+            "has_before_after": true,
+            "has_dates": false,
+            "has_change_verb": true,
+            "date_mentions": [],
+            "is_temporal": true
+          },
+          "spatial": {
+            "has_bbox_mention": false,
+            "has_region_name": false,
+            "region": null,
+            "has_spatial": false
+          },
+          "comparison": {
+            "is_comparison": false,
+            "entities": []
+          }
+        },
+        "is_followup": false,
+        "followup_anchor": null,
+        "followup_resolved": false
+      },
+      "plan": {
+        "task_type": "change_vqa",
+        "reasoning": "Planned change_vqa for query: What changed between these two dates, and where?",
+        "required_assets": [],
+        "fusion_needed": false,
+        "temporal_needed": true,
+        "confidence": 0.82,
+        "_provider": "groq",
+        "requires_coreg": true,
+        "tile_config": {
+          "enabled": true,
+          "size": 256,
+          "overlap_px": 32
+        },
+        "data_requirements": {
+          "temporal": "multi",
+          "bands": [
+            "B2",
+            "B3",
+            "B4"
+          ],
+          "sar_pol": null
+        },
+        "steps": [
+          "preprocessing",
+          "vision_encoder",
+          "fusion",
+          "task_agent"
+        ],
+        "fusion_method": "late",
+        "sub_queries": null,
+        "spatial_aggregation": null
+      },
+      "region_of_interest": null,
+      "sub_queries": null,
+      "encoder": "prithvi",
+      "coreg": {
+        "ssim": 0.904,
+        "residual": 0.26,
+        "method": "dummy_affine",
+        "passed": true,
+        "num_tiles": 4
+      },
+      "coreg_passed": true,
+      "requires_coreg": true,
+      "spectral_indices": null,
+      "tiles": [
+        {
+          "tile_id": "img_2021_tile_0",
+          "asset_id": "img_2021",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000063.4206092
+        },
+        {
+          "tile_id": "img_2021_tile_1",
+          "asset_id": "img_2021",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000063.4206092
+        },
+        {
+          "tile_id": "img_2023_tile_0",
+          "asset_id": "img_2023",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000063.4206092
+        },
+        {
+          "tile_id": "img_2023_tile_1",
+          "asset_id": "img_2023",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000063.4206092
+        }
+      ],
+      "embeddings_meta": {
+        "prithvi": {
+          "count": 4,
+          "dim": 768
+        }
+      },
+      "fused_repr_meta": {
+        "fusion_method": "attention",
+        "confidence": 0.9,
+        "dim": 768
+      },
+      "task_output": {
+        "task": "change_vqa",
+        "query": "What changed between these two dates, and where?",
+        "image_t1_id": "img_2021",
+        "image_t2_id": "img_2023",
+        "answer_text": "Built-up area has expanded along the eastern edge, replacing what was previously bare soil.",
+        "change_categories": [
+          "built-up_increase"
+        ],
+        "change_magnitude_pct": 14.8,
+        "severity": "moderate",
+        "change_mask_rle": null,
+        "confidence": 0.83,
+        "answer_numeric": 14.8,
+        "answer_unit": "percent",
+        "answer_temporal_ref": "2021-2023",
+        "per_tile_confidence": {
+          "img_2021_tile_0": 0.81,
+          "img_2023_tile_0": 0.83
+        }
+      },
+      "final_result": {
+        "task": "change_vqa",
+        "query": "What changed between these two dates, and where?",
+        "image_t1_id": "img_2021",
+        "image_t2_id": "img_2023",
+        "answer_text": "\n<think>\nHere's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Query:** \"What changed between these two dates, and where?\"\n   - **Task Output:** JSON containing:\n     - `answer_text`: \"Built-up area has expanded along the eastern edge, replacing what was previously bare soil.\"\n     - `change_categories`: [\"built-up_increase\"]\n     - `change_magnitude_pct`: 14.8\n     - `severity`: \"moderate\"\n     - `confidence`: 0.83\n     - `answer_numeric`: 14.8\n     - `answer_unit`: \"percent\"\n     - `answer_temporal_ref`: \"2021-2023\"\n     - `per_tile_confidence`: {\"img_2021_tile_0\": 0.81, \"img_2023_tile_0\": 0.83}\n     - `execution_trace`: Shows successful processing, coregistration (SSIM: 0.904), vision encoder (prithvi), fusion (attention), task agent confidence 0.83.\n   - **Constraints:** Write concise markdown answer with > confidence, bbox if present, and evidence summary. Keep under 400 words.\n\n2.  **Extract Key Information:**\n   - **Change:** Built-up area expansion\n   - **Location:** Eastern edge\n   - **Previous State:** Bare soil\n   - **Magnitude:** 14.8% increase\n   - **Severity:** Moderate\n   - **Timeframe:** 2021 to 2023\n   - **Confidence:** 83% (0.83)\n   - **Evidence/Trace:** Coregistration successful (SSIM 0.904), processed via Prithvi vision encoder with attention fusion, 4 tiles analyzed.\n\n3.  **Format Requirements:**\n   - Concise markdown\n   - Include confidence (> confidence format? The prompt says \"> confidence\", likely meaning \"Confidence: X%\")\n   - Include bbox if present (not present in output, so skip or note N/A)\n   - Include evidence summary\n   - Under 400 words\n\n4.  **Draft Construction:**\n   **Change Detected:** Built-up area expansion  \n   **Location:** Eastern edge of the region  \n   **Timeframe:** 2021\u20132023  \n   **Magnitude:** 14.8% increase in built-up coverage  \n   **Severity:** Moderate  \n\n   **Confidence:** 83%  \n\n   **Evidence Summary:**  \n   Analysis of coregistered satellite imagery (SSIM: 0.904) reveals a moderate expansion of built-up infrastructure along the eastern boundary between 2021 and ",
+        "change_categories": [
+          "built-up_increase"
+        ],
+        "change_magnitude_pct": 14.8,
+        "severity": "moderate",
+        "change_mask_rle": null,
+        "confidence": 0.83,
+        "answer_numeric": 14.8,
+        "answer_unit": "percent",
+        "answer_temporal_ref": "2021-2023",
+        "per_tile_confidence": {
+          "img_2021_tile_0": 0.81,
+          "img_2023_tile_0": 0.83
+        },
+        "execution_trace": [
+          {
+            "agent": "input_validator",
+            "status": "ok",
+            "detail": {
+              "query_len": 48,
+              "num_assets": 2
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "router",
+            "status": "ok",
+            "detail": {
+              "task_type": "change_vqa",
+              "raw": {
+                "task_type": "change_vqa",
+                "reasoning": "Groq qwen groq/compound-mini single-word",
+                "confidence": 0.9,
+                "_provider": "groq",
+                "_model": "groq/compound-mini"
+              }
+            },
+            "latency_ms": 870
+          },
+          {
+            "agent": "planner",
+            "status": "ok",
+            "detail": {
+              "plan": {
+                "task_type": "change_vqa",
+                "reasoning": "Planned change_vqa for query: What changed between these two dates, and where?",
+                "required_assets": [],
+                "fusion_needed": false,
+                "temporal_needed": true,
+                "confidence": 0.82,
+                "_provider": "groq",
+                "requires_coreg": true,
+                "tile_config": {
+                  "enabled": true,
+                  "size": 256,
+                  "overlap_px": 32
+                },
+                "data_requirements": {
+                  "temporal": "multi",
+                  "bands": [
+                    "B2",
+                    "B3",
+                    "B4"
+                  ],
+                  "sar_pol": null
+                },
+                "steps": [
+                  "preprocessing",
+                  "vision_encoder",
+                  "fusion",
+                  "task_agent"
+                ],
+                "fusion_method": "late",
+                "sub_queries": null,
+                "spatial_aggregation": null
+              },
+              "requires_coreg": true,
+              "sub_queries": null,
+              "region": null
+            },
+            "latency_ms": 7043
+          },
+          {
+            "agent": "preprocessing",
+            "status": "ok",
+            "detail": {
+              "num_tiles": 4,
+              "coreg": {
+                "ssim": 0.904,
+                "residual": 0.26,
+                "method": "dummy_affine",
+                "passed": true,
+                "num_tiles": 4
+              },
+              "gsd_normalized": 10.0,
+              "spectral": {
+                "ndvi_mean": 0.42,
+                "ndwi_mean": -0.12,
+                "ndbi_mean": 0.18,
+                "evi_mean": 0.35
+              },
+              "roi": null
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_selector",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "modalities": [
+                "optical",
+                "optical"
+              ],
+              "task": "change_vqa"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_compat",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "requires_coreg": true,
+              "band_reports": [
+                {
+                  "asset_id": "img_2021",
+                  "bands": [
+                    "B02",
+                    "B03",
+                    "B04",
+                    "B08"
+                  ],
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": true,
+                  "note": ""
+                },
+                {
+                  "asset_id": "img_2023",
+                  "bands": [
+                    "B02",
+                    "B03",
+                    "B04",
+                    "B08"
+                  ],
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": true,
+                  "note": ""
+                }
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "coreg_gate",
+            "status": "ok",
+            "detail": {
+              "ssim": 0.904,
+              "residual": 0.26
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "vision_encoder",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "num_tiles": 4,
+              "embed_keys": [
+                "prithvi"
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "fusion",
+            "status": "ok",
+            "detail": {
+              "method": "attention",
+              "confidence": 0.9,
+              "dim": 768
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "task_agent",
+            "status": "ok",
+            "detail": {
+              "task": "change_vqa",
+              "confidence": 0.83,
+              "sub_queries": 0,
+              "has_numeric": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "tile_manager",
+            "status": "ok",
+            "detail": {
+              "counts": {
+                "pending": 0,
+                "done": 4,
+                "failed": 0
+              },
+              "num_tiles": 4
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "post_processing",
+            "status": "ok",
+            "detail": {
+              "confidence": 0.83,
+              "has_chart": true,
+              "stitched": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "response_composer",
+            "status": "ok",
+            "detail": {
+              "composed_len": 2059,
+              "followups": 3,
+              "version": 1
+            },
+            "latency_ms": 11903
+          }
+        ],
+        "crs": "EPSG:4326",
+        "acquisition_dates": [],
+        "coreg_passed": true,
+        "encoder_used": "prithvi",
+        "fusion_method": "late",
+        "chart_spec": {
+          "type": "bar",
+          "title": "Change by category (ha)",
+          "data": [
+            {
+              "name": "built-up increase",
+              "value": 22.14
+            }
+          ],
+          "unit": "ha",
+          "note": "Change-VQA \u2022 per-category magnitude"
+        },
+        "output_format": "json",
+        "composed_by": "qwen3.5-9b",
+        "chart_prompt_fragment": "CHART RULES \u2014 if your answer contains numbers, emit ONE ```chart block after the narrative, before the table:\n- Type: bar (default) / donut for 2-4 proportional slices / area|line for temporal / radia...",
+        "followup_suggestions": [
+          "Show built-up_increase magnitude as chart?",
+          "By how many ha did built-up increase per sector?",
+          "Show change mask as GeoJSON?"
+        ],
+        "confidence_explanation": "Moderate confidence \u2014 some ambiguity in tile evidence; coreg passed (SSIM\u22650.75); encoder prithvi.",
+        "composer_version": 1,
+        "_session_id": "complete_demo_02_change_vqa"
+      },
+      "execution_trace": [
+        {
+          "agent": "input_validator",
+          "status": "ok",
+          "detail": {
+            "query_len": 48,
+            "num_assets": 2
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "router",
+          "status": "ok",
+          "detail": {
+            "task_type": "change_vqa",
+            "raw": {
+              "task_type": "change_vqa",
+              "reasoning": "Groq qwen groq/compound-mini single-word",
+              "confidence": 0.9,
+              "_provider": "groq",
+              "_model": "groq/compound-mini"
+            }
+          },
+          "latency_ms": 870
+        },
+        {
+          "agent": "planner",
+          "status": "ok",
+          "detail": {
+            "plan": {
+              "task_type": "change_vqa",
+              "reasoning": "Planned change_vqa for query: What changed between these two dates, and where?",
+              "required_assets": [],
+              "fusion_needed": false,
+              "temporal_needed": true,
+              "confidence": 0.82,
+              "_provider": "groq",
+              "requires_coreg": true,
+              "tile_config": {
+                "enabled": true,
+                "size": 256,
+                "overlap_px": 32
+              },
+              "data_requirements": {
+                "temporal": "multi",
+                "bands": [
+                  "B2",
+                  "B3",
+                  "B4"
+                ],
+                "sar_pol": null
+              },
+              "steps": [
+                "preprocessing",
+                "vision_encoder",
+                "fusion",
+                "task_agent"
+              ],
+              "fusion_method": "late",
+              "sub_queries": null,
+              "spatial_aggregation": null
+            },
+            "requires_coreg": true,
+            "sub_queries": null,
+            "region": null
+          },
+          "latency_ms": 7043
+        },
+        {
+          "agent": "preprocessing",
+          "status": "ok",
+          "detail": {
+            "num_tiles": 4,
+            "coreg": {
+              "ssim": 0.904,
+              "residual": 0.26,
+              "method": "dummy_affine",
+              "passed": true,
+              "num_tiles": 4
+            },
+            "gsd_normalized": 10.0,
+            "spectral": {
+              "ndvi_mean": 0.42,
+              "ndwi_mean": -0.12,
+              "ndbi_mean": 0.18,
+              "evi_mean": 0.35
+            },
+            "roi": null
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_selector",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "modalities": [
+              "optical",
+              "optical"
+            ],
+            "task": "change_vqa"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_compat",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "requires_coreg": true,
+            "band_reports": [
+              {
+                "asset_id": "img_2021",
+                "bands": [
+                  "B02",
+                  "B03",
+                  "B04",
+                  "B08"
+                ],
+                "available": true,
+                "missing": [],
+                "substitute_possible": true,
+                "note": ""
+              },
+              {
+                "asset_id": "img_2023",
+                "bands": [
+                  "B02",
+                  "B03",
+                  "B04",
+                  "B08"
+                ],
+                "available": true,
+                "missing": [],
+                "substitute_possible": true,
+                "note": ""
+              }
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "coreg_gate",
+          "status": "ok",
+          "detail": {
+            "ssim": 0.904,
+            "residual": 0.26
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "vision_encoder",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "num_tiles": 4,
+            "embed_keys": [
+              "prithvi"
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "fusion",
+          "status": "ok",
+          "detail": {
+            "method": "attention",
+            "confidence": 0.9,
+            "dim": 768
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "task_agent",
+          "status": "ok",
+          "detail": {
+            "task": "change_vqa",
+            "confidence": 0.83,
+            "sub_queries": 0,
+            "has_numeric": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "tile_manager",
+          "status": "ok",
+          "detail": {
+            "counts": {
+              "pending": 0,
+              "done": 4,
+              "failed": 0
+            },
+            "num_tiles": 4
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "post_processing",
+          "status": "ok",
+          "detail": {
+            "confidence": 0.83,
+            "has_chart": true,
+            "stitched": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "response_composer",
+          "status": "ok",
+          "detail": {
+            "composed_len": 2059,
+            "followups": 3,
+            "version": 1
+          },
+          "latency_ms": 11903
+        }
+      ],
+      "error_log": [],
+      "elapsed_s": 19.842
+    },
+    {
+      "case": "optical_sar_fusion",
+      "expected_task": "optical_sar_fusion",
+      "sensor": "Sentinel-1 + Sentinel-2",
+      "input": {
+        "session_id": "complete_demo_03_optical_sar_fusion",
+        "query": "Identify built-up and water-covered regions using both images",
+        "assets": [
+          {
+            "asset_id": "s2_001",
+            "modality": "optical",
+            "crs": "EPSG:32617",
+            "gsd": 10.0,
+            "bands": [
+              "B02",
+              "B03",
+              "B04",
+              "B08",
+              "B11"
+            ]
+          },
+          {
+            "asset_id": "s1_001",
+            "modality": "sar",
+            "crs": "EPSG:32617",
+            "gsd": 10.0,
+            "bands": [
+              "VV",
+              "VH"
+            ],
+            "sar_polarization": "VV+VH"
+          }
+        ],
+        "image_ids": [
+          "s2_001",
+          "s1_001"
+        ]
+      },
+      "routing": {
+        "task_type": "optical_sar_fusion",
+        "query_analysis": {
+          "temporal": {
+            "has_before_after": false,
+            "has_dates": false,
+            "has_change_verb": false,
+            "date_mentions": [],
+            "is_temporal": false
+          },
+          "spatial": {
+            "has_bbox_mention": false,
+            "has_region_name": false,
+            "region": null,
+            "has_spatial": false
+          },
+          "comparison": {
+            "is_comparison": false,
+            "entities": []
+          }
+        },
+        "is_followup": false,
+        "followup_anchor": null,
+        "followup_resolved": false
+      },
+      "plan": {
+        "task_type": "optical_sar_fusion",
+        "reasoning": "Planned optical_sar_fusion for query: Identify built-up and water-covered regions using both images",
+        "required_assets": [],
+        "fusion_needed": true,
+        "temporal_needed": false,
+        "confidence": 0.82,
+        "_provider": "groq",
+        "requires_coreg": true,
+        "tile_config": {
+          "enabled": true,
+          "size": 256,
+          "overlap_px": 32
+        },
+        "data_requirements": {
+          "temporal": "multi",
+          "bands": [
+            "B2",
+            "B3",
+            "B4"
+          ],
+          "sar_pol": null
+        },
+        "steps": [
+          "preprocessing",
+          "vision_encoder",
+          "fusion",
+          "task_agent"
+        ],
+        "fusion_method": "attention",
+        "sub_queries": null,
+        "spatial_aggregation": null
+      },
+      "region_of_interest": null,
+      "sub_queries": null,
+      "encoder": "croma",
+      "coreg": {
+        "ssim": 0.929,
+        "residual": 0.396,
+        "method": "dummy_affine",
+        "passed": true,
+        "num_tiles": 4
+      },
+      "coreg_passed": true,
+      "requires_coreg": true,
+      "spectral_indices": null,
+      "tiles": [
+        {
+          "tile_id": "s2_001_tile_0",
+          "asset_id": "s2_001",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000083.4885328
+        },
+        {
+          "tile_id": "s2_001_tile_1",
+          "asset_id": "s2_001",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000083.4885328
+        },
+        {
+          "tile_id": "s1_001_tile_0",
+          "asset_id": "s1_001",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "sar",
+          "status": "done",
+          "updated_at": 1788000083.4885328
+        },
+        {
+          "tile_id": "s1_001_tile_1",
+          "asset_id": "s1_001",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "sar",
+          "status": "done",
+          "updated_at": 1788000083.4885328
+        }
+      ],
+      "embeddings_meta": {
+        "optical": {
+          "count": 2,
+          "dim": 768
+        },
+        "sar": {
+          "count": 2,
+          "dim": 768
+        },
+        "joint": {
+          "count": 2,
+          "dim": 768
+        },
+        "model": {
+          "count": 1,
+          "dim": 768
+        }
+      },
+      "fused_repr_meta": {
+        "fusion_method": "attention",
+        "confidence": 0.83,
+        "dim": 768
+      },
+      "task_output": {
+        "task": "optical_sar_fusion",
+        "query": "Identify built-up and water-covered regions using both images",
+        "optical_image_id": "s2_001",
+        "sar_image_id": "s1_001",
+        "answer_text": "The fused analysis shows built-up regions concentrated in the southwest, with a water body along the northern boundary confirmed by both optical reflectance and SAR backscatter.",
+        "class_map_rle": {
+          "built-up": "RLE_STRING_HERE",
+          "water": "RLE_STRING_HERE",
+          "other": "RLE_STRING_HERE"
+        },
+        "unlabeled_rle": "RLE_UNLABELED",
+        "per_modality_confidence": {
+          "optical": 0.83,
+          "sar": 0.78,
+          "fused": 0.9
+        },
+        "answer_numeric": 0.9,
+        "answer_unit": "confidence",
+        "per_tile_confidence": {
+          "s2_001_tile_0": 0.83,
+          "s1_001_tile_0": 0.78
+        },
+        "attention_maps": null
+      },
+      "final_result": {
+        "task": "optical_sar_fusion",
+        "query": "Identify built-up and water-covered regions using both images",
+        "optical_image_id": "s2_001",
+        "sar_image_id": "s1_001",
+        "answer_text": "\n<think>\nHere's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Role:** Satiq's response composer. Fuse tool outputs into final answer.\n   - **Query:** Identify built-up and water-covered regions using both images\n   - **Task Output:** JSON containing:\n     - `task`: \"optical_sar_fusion\"\n     - `query`: \"Identify built-up and water-covered regions using both images\"\n     - `optical_image_id`: \"s2_001\"\n     - `sar_image_id`: \"s1_001\"\n     - `answer_text`: \"The fused analysis shows built-up regions concentrated in the southwest, with a water body along the northern boundary confirmed by both optical reflectance and SAR backscatter.\"\n     - `class_map_rle`: placeholders for built-up, water, other\n     - `per_modality_confidence`: optical: 0.83, sar: 0.78, fused: 0.9\n     - `answer_numeric`: 0.9\n     - `answer_unit`: \"confidence\"\n     - `per_tile_confidence`: s2_001_tile_0: 0.83, s1_001_tile_0: 0.78\n     - `execution_trace`: Shows successful pipeline steps (input_validator, router, planner, preprocessing, vision_encoder, fusion, task_agent, tile_manager, post_processing) with latencies and details. Coregistration SSIM: 0.929, residual: 0.396. Fusion method: attention. Confidence: 0.9.\n   - **Constraints:** Write concise markdown answer with > confidence, bbox if present, and evidence summary. Keep under 400 words.\n\n2.  **Identify Key Requirements for Output:**\n   - Format: Concise markdown\n   - Must include: Confidence score (> confidence format? The prompt says \"> confidence\", likely meaning a section or line starting with `> confidence: 0.9` or similar, or just explicitly state it. I'll format it clearly.)\n   - Must include: Bounding box if present (The output doesn't explicitly provide bbox coordinates, but mentions spatial locations: \"southwest\" for built-up, \"northern boundary\" for water. I'll note this or state \"N/A\" if exact coordinates aren't provided, but I can infer approximate regions from the text.)\n   - Must include: Evidence summary\n   - Word count: Under 400 words.\n\n3.  **Draft Construction (Mental Refinement):**\n   **Confidence:** 0.90 (Fused)\n   **Spatial Extent:** \n   - Built-up: Southwest quadrant\n   - Water: Northern boundary\n   **Evidence Summary:** \n  ",
+        "class_map_rle": {
+          "built-up": "RLE_STRING_HERE",
+          "water": "RLE_STRING_HERE",
+          "other": "RLE_STRING_HERE"
+        },
+        "unlabeled_rle": "RLE_UNLABELED",
+        "per_modality_confidence": {
+          "optical": 0.83,
+          "sar": 0.78,
+          "fused": 0.9
+        },
+        "answer_numeric": 0.9,
+        "answer_unit": "confidence",
+        "per_tile_confidence": {
+          "s2_001_tile_0": 0.83,
+          "s1_001_tile_0": 0.78
+        },
+        "attention_maps": null,
+        "confidence": 0.9,
+        "execution_trace": [
+          {
+            "agent": "input_validator",
+            "status": "ok",
+            "detail": {
+              "query_len": 61,
+              "num_assets": 2
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "router",
+            "status": "ok",
+            "detail": {
+              "task_type": "optical_sar_fusion",
+              "raw": {
+                "task_type": "optical_sar_fusion",
+                "reasoning": "Groq qwen groq/compound-mini single-word",
+                "confidence": 0.9,
+                "_provider": "groq",
+                "_model": "groq/compound-mini"
+              }
+            },
+            "latency_ms": 928
+          },
+          {
+            "agent": "planner",
+            "status": "ok",
+            "detail": {
+              "plan": {
+                "task_type": "optical_sar_fusion",
+                "reasoning": "Planned optical_sar_fusion for query: Identify built-up and water-covered regions using both images",
+                "required_assets": [],
+                "fusion_needed": true,
+                "temporal_needed": false,
+                "confidence": 0.82,
+                "_provider": "groq",
+                "requires_coreg": true,
+                "tile_config": {
+                  "enabled": true,
+                  "size": 256,
+                  "overlap_px": 32
+                },
+                "data_requirements": {
+                  "temporal": "multi",
+                  "bands": [
+                    "B2",
+                    "B3",
+                    "B4"
+                  ],
+                  "sar_pol": null
+                },
+                "steps": [
+                  "preprocessing",
+                  "vision_encoder",
+                  "fusion",
+                  "task_agent"
+                ],
+                "fusion_method": "attention",
+                "sub_queries": null,
+                "spatial_aggregation": null
+              },
+              "requires_coreg": true,
+              "sub_queries": null,
+              "region": null
+            },
+            "latency_ms": 7202
+          },
+          {
+            "agent": "preprocessing",
+            "status": "ok",
+            "detail": {
+              "num_tiles": 4,
+              "coreg": {
+                "ssim": 0.929,
+                "residual": 0.396,
+                "method": "dummy_affine",
+                "passed": true,
+                "num_tiles": 4
+              },
+              "gsd_normalized": 10.0,
+              "spectral": {
+                "ndvi_mean": 0.42,
+                "ndwi_mean": -0.12,
+                "ndbi_mean": 0.18,
+                "evi_mean": 0.35
+              },
+              "roi": null
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_selector",
+            "status": "ok",
+            "detail": {
+              "encoder": "croma",
+              "modalities": [
+                "optical",
+                "sar"
+              ],
+              "task": "optical_sar_fusion"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_compat",
+            "status": "ok",
+            "detail": {
+              "encoder": "croma",
+              "requires_coreg": true,
+              "band_reports": [
+                {
+                  "asset_id": "s2_001",
+                  "bands": [
+                    "B02",
+                    "B03",
+                    "B04",
+                    "B08",
+                    "B11"
+                  ],
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": true,
+                  "note": ""
+                },
+                {
+                  "asset_id": "s1_001",
+                  "bands": [
+                    "VV",
+                    "VH"
+                  ],
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": false,
+                  "note": "SAR no specific pol required"
+                }
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "coreg_gate",
+            "status": "ok",
+            "detail": {
+              "ssim": 0.929,
+              "residual": 0.396
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "vision_encoder",
+            "status": "ok",
+            "detail": {
+              "encoder": "croma",
+              "num_tiles": 4,
+              "embed_keys": [
+                "optical",
+                "sar",
+                "joint",
+                "model"
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "fusion",
+            "status": "ok",
+            "detail": {
+              "method": "attention",
+              "confidence": 0.83,
+              "dim": 768
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "task_agent",
+            "status": "ok",
+            "detail": {
+              "task": "optical_sar_fusion",
+              "confidence": 0.9,
+              "sub_queries": 0,
+              "has_numeric": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "tile_manager",
+            "status": "ok",
+            "detail": {
+              "counts": {
+                "pending": 0,
+                "done": 4,
+                "failed": 0
+              },
+              "num_tiles": 4
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "post_processing",
+            "status": "ok",
+            "detail": {
+              "confidence": 0.9,
+              "has_chart": true,
+              "stitched": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "response_composer",
+            "status": "ok",
+            "detail": {
+              "composed_len": 2216,
+              "followups": 3,
+              "version": 1
+            },
+            "latency_ms": 11828
+          }
+        ],
+        "crs": "EPSG:4326",
+        "acquisition_dates": [],
+        "coreg_passed": true,
+        "encoder_used": "croma",
+        "fusion_method": "attention",
+        "chart_spec": {
+          "type": "bar",
+          "title": "Modality confidence",
+          "data": [
+            {
+              "name": "Optical",
+              "value": 0.83
+            },
+            {
+              "name": "SAR",
+              "value": 0.78
+            },
+            {
+              "name": "Fused",
+              "value": 0.9
+            }
+          ],
+          "unit": "confidence",
+          "note": "CROMA cross-attention \u2022 per-modality confidence"
+        },
+        "output_format": "json",
+        "composed_by": "qwen3.5-9b",
+        "chart_prompt_fragment": "CHART RULES \u2014 if your answer contains numbers, emit ONE ```chart block after the narrative, before the table:\n- Type: bar (default) / donut for 2-4 proportional slices / area|line for temporal / radia...",
+        "followup_suggestions": [
+          "Which modality contributed more to water detection?",
+          "Export class map as GeoJSON?",
+          "Show per-tile confidence breakdown?"
+        ],
+        "confidence_explanation": "High confidence based on clear spectral contrast; coreg passed (SSIM\u22650.75); encoder croma.",
+        "composer_version": 1,
+        "_session_id": "complete_demo_03_optical_sar_fusion"
+      },
+      "execution_trace": [
+        {
+          "agent": "input_validator",
+          "status": "ok",
+          "detail": {
+            "query_len": 61,
+            "num_assets": 2
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "router",
+          "status": "ok",
+          "detail": {
+            "task_type": "optical_sar_fusion",
+            "raw": {
+              "task_type": "optical_sar_fusion",
+              "reasoning": "Groq qwen groq/compound-mini single-word",
+              "confidence": 0.9,
+              "_provider": "groq",
+              "_model": "groq/compound-mini"
+            }
+          },
+          "latency_ms": 928
+        },
+        {
+          "agent": "planner",
+          "status": "ok",
+          "detail": {
+            "plan": {
+              "task_type": "optical_sar_fusion",
+              "reasoning": "Planned optical_sar_fusion for query: Identify built-up and water-covered regions using both images",
+              "required_assets": [],
+              "fusion_needed": true,
+              "temporal_needed": false,
+              "confidence": 0.82,
+              "_provider": "groq",
+              "requires_coreg": true,
+              "tile_config": {
+                "enabled": true,
+                "size": 256,
+                "overlap_px": 32
+              },
+              "data_requirements": {
+                "temporal": "multi",
+                "bands": [
+                  "B2",
+                  "B3",
+                  "B4"
+                ],
+                "sar_pol": null
+              },
+              "steps": [
+                "preprocessing",
+                "vision_encoder",
+                "fusion",
+                "task_agent"
+              ],
+              "fusion_method": "attention",
+              "sub_queries": null,
+              "spatial_aggregation": null
+            },
+            "requires_coreg": true,
+            "sub_queries": null,
+            "region": null
+          },
+          "latency_ms": 7202
+        },
+        {
+          "agent": "preprocessing",
+          "status": "ok",
+          "detail": {
+            "num_tiles": 4,
+            "coreg": {
+              "ssim": 0.929,
+              "residual": 0.396,
+              "method": "dummy_affine",
+              "passed": true,
+              "num_tiles": 4
+            },
+            "gsd_normalized": 10.0,
+            "spectral": {
+              "ndvi_mean": 0.42,
+              "ndwi_mean": -0.12,
+              "ndbi_mean": 0.18,
+              "evi_mean": 0.35
+            },
+            "roi": null
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_selector",
+          "status": "ok",
+          "detail": {
+            "encoder": "croma",
+            "modalities": [
+              "optical",
+              "sar"
+            ],
+            "task": "optical_sar_fusion"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_compat",
+          "status": "ok",
+          "detail": {
+            "encoder": "croma",
+            "requires_coreg": true,
+            "band_reports": [
+              {
+                "asset_id": "s2_001",
+                "bands": [
+                  "B02",
+                  "B03",
+                  "B04",
+                  "B08",
+                  "B11"
+                ],
+                "available": true,
+                "missing": [],
+                "substitute_possible": true,
+                "note": ""
+              },
+              {
+                "asset_id": "s1_001",
+                "bands": [
+                  "VV",
+                  "VH"
+                ],
+                "available": true,
+                "missing": [],
+                "substitute_possible": false,
+                "note": "SAR no specific pol required"
+              }
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "coreg_gate",
+          "status": "ok",
+          "detail": {
+            "ssim": 0.929,
+            "residual": 0.396
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "vision_encoder",
+          "status": "ok",
+          "detail": {
+            "encoder": "croma",
+            "num_tiles": 4,
+            "embed_keys": [
+              "optical",
+              "sar",
+              "joint",
+              "model"
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "fusion",
+          "status": "ok",
+          "detail": {
+            "method": "attention",
+            "confidence": 0.83,
+            "dim": 768
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "task_agent",
+          "status": "ok",
+          "detail": {
+            "task": "optical_sar_fusion",
+            "confidence": 0.9,
+            "sub_queries": 0,
+            "has_numeric": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "tile_manager",
+          "status": "ok",
+          "detail": {
+            "counts": {
+              "pending": 0,
+              "done": 4,
+              "failed": 0
+            },
+            "num_tiles": 4
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "post_processing",
+          "status": "ok",
+          "detail": {
+            "confidence": 0.9,
+            "has_chart": true,
+            "stitched": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "response_composer",
+          "status": "ok",
+          "detail": {
+            "composed_len": 2216,
+            "followups": 3,
+            "version": 1
+          },
+          "latency_ms": 11828
+        }
+      ],
+      "error_log": [],
+      "elapsed_s": 19.977
+    },
+    {
+      "case": "captioning",
+      "expected_task": "vqa",
+      "sensor": null,
+      "input": {
+        "session_id": "complete_demo_04_captioning",
+        "query": "Caption this image focusing on built-up and vegetation",
+        "assets": [
+          {
+            "asset_id": "img_001",
+            "modality": "optical",
+            "crs": "EPSG:32617",
+            "bands": [
+              "B02",
+              "B03",
+              "B04",
+              "B08"
+            ]
+          }
+        ],
+        "image_ids": [
+          "img_001"
+        ]
+      },
+      "routing": {
+        "task_type": "vqa",
+        "query_analysis": {
+          "temporal": {
+            "has_before_after": false,
+            "has_dates": false,
+            "has_change_verb": false,
+            "date_mentions": [],
+            "is_temporal": false
+          },
+          "spatial": {
+            "has_bbox_mention": false,
+            "has_region_name": false,
+            "region": null,
+            "has_spatial": false
+          },
+          "comparison": {
+            "is_comparison": false,
+            "entities": []
+          }
+        },
+        "is_followup": false,
+        "followup_anchor": null,
+        "followup_resolved": false
+      },
+      "plan": {
+        "task_type": "vqa",
+        "reasoning": "The query requires generating a descriptive caption highlighting built-up areas and vegetation. The provided optical asset (img_001) contains RGB (B02, B03, B04) and NIR (B08) bands, which are sufficient for distinguishing vegetation (via NIR/Red contrast) and built-up surfaces (via RGB spectral signatures). A single static image is adequate for this descriptive task, eliminating the need for temporal analysis or multi-modal fusion. The pipeline will involve spectral feature extraction, land cover classification/segmentation, and natural language generation focused on the requested themes.",
+        "required_assets": [
+          "img_001"
+        ],
+        "fusion_needed": false,
+        "temporal_needed": false,
+        "confidence": 0.95,
+        "_provider": "groq",
+        "_model": "qwen/qwen3.6-27b",
+        "requires_coreg": false,
+        "tile_config": {
+          "enabled": true,
+          "size": 256,
+          "overlap_px": 32
+        },
+        "data_requirements": {
+          "temporal": "single",
+          "bands": [
+            "B2",
+            "B3",
+            "B4"
+          ],
+          "sar_pol": null
+        },
+        "steps": [
+          "preprocessing",
+          "vision_encoder",
+          "fusion",
+          "task_agent"
+        ],
+        "fusion_method": "late",
+        "sub_queries": null,
+        "spatial_aggregation": null
+      },
+      "region_of_interest": null,
+      "sub_queries": null,
+      "encoder": "satmae",
+      "coreg": {
+        "ssim": 1.0,
+        "residual": 0.0,
+        "method": "dummy_affine",
+        "passed": true,
+        "num_tiles": 1
+      },
+      "coreg_passed": true,
+      "requires_coreg": false,
+      "spectral_indices": null,
+      "tiles": [
+        {
+          "tile_id": "img_001_tile_0",
+          "asset_id": "img_001",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000102.5358582
+        }
+      ],
+      "embeddings_meta": {
+        "satmae": {
+          "count": 1,
+          "dim": 1024
+        }
+      },
+      "fused_repr_meta": {
+        "fusion_method": "attention",
+        "confidence": 0.86,
+        "dim": 768
+      },
+      "task_output": {
+        "task": "vqa",
+        "query": "Caption this image focusing on built-up and vegetation",
+        "image_id": "img_001",
+        "answer_text": "The image shows a mix of agricultural fields in the center, a small settlement cluster to the east, and a forested patch along the western edge.",
+        "answer_type": "open",
+        "answer_short": null,
+        "confidence": 0.87,
+        "spatial_bbox": null,
+        "answer_numeric": null,
+        "answer_unit": null,
+        "answer_temporal_ref": null,
+        "per_tile_confidence": {
+          "img_001_tile_0": 0.916
+        },
+        "attention_maps": null,
+        "caption_text": "The image shows a mix of agricultural fields in the center, a small settlement cluster to the east, and a forested patch along the western edge.",
+        "key_objects": [
+          "agricultural fields",
+          "settlement",
+          "forest"
+        ]
+      },
+      "final_result": {
+        "task": "vqa",
+        "query": "Caption this image focusing on built-up and vegetation",
+        "image_id": "img_001",
+        "answer_text": "\n<think>\nHere's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Role:** Satiq's response composer\n   - **Task:** Fuse tool outputs into final answer\n   - **Query:** \"Caption this image focusing on built-up and vegetation\"\n   - **Task Output:** JSON containing VQA results, including `answer_text`, `caption_text`, `key_objects`, `confidence`, `execution_trace`, etc.\n   - **Constraints:** Concise markdown answer, include confidence, bbox if present, evidence summary, keep under 400 words.\n\n2.  **Extract Key Information from Output:**\n   - `answer_text` / `caption_text`: \"The image shows a mix of agricultural fields in the center, a small settlement cluster to the east, and a forested patch along the western edge.\"\n   - `confidence`: 0.87\n   - `spatial_bbox`: null\n   - `key_objects`: [\"agricultural fields\", \"settlement\", \"forest\"]\n   - `execution_trace`: Shows successful pipeline execution (input validation, routing, planning, vision encoding, fusion, task agent, post-processing). Mentions use of RGB and NIR bands for distinguishing vegetation and built-up surfaces.\n\n3.  **Structure the Response (per constraints):**\n   - **Caption:** Directly use the generated caption.\n   - **Confidence:** State the confidence score.\n   - **Bounding Box:** Note if present (it's null, so state \"Not applicable\" or omit as per constraint \"bbox if present\").\n   - **Evidence Summary:** Briefly explain how the conclusion was reached based on the trace (spectral analysis of RGB/NIR bands, land cover classification, spatial distribution).\n   - **Format:** Markdown, concise, <400 words.\n\n4.  **Draft Construction:**\n   **Caption:** The image shows a mix of agricultural fields in the center, a small settlement cluster to the east, and a forested patch along the western edge.\n\n   **Confidence:** 0.87\n\n   **Bounding Box:** Not applicable\n\n   **Evidence Summary:** \n   The analysis leveraged RGB (B02, B03, B04) and Near-Infrared (B08) spectral bands to differentiate land cover types. Vegetation was identified through high NIR reflectance contrast, highlighting the central agricultural fields and western forested area. Built-up surfaces were distinguished using RGB spectral signatures, revealing the eastern settlement cluster. The pipeline successfully fused spatial and spectral features via attention-based encoding, confirming the spatial distribution of natural and anthropogenic features without requiring temporal or multi-modal fusion.\n\n5.  **Check Constraints:**\n   - Concise markdown? Yes.\n   - > confidence? Yes (0.87).\n   - bbox if present? Noted as not applicable (since null).",
+        "answer_type": "open",
+        "answer_short": null,
+        "confidence": 0.87,
+        "spatial_bbox": null,
+        "answer_numeric": null,
+        "answer_unit": null,
+        "answer_temporal_ref": null,
+        "per_tile_confidence": {
+          "img_001_tile_0": 0.916
+        },
+        "attention_maps": null,
+        "caption_text": "The image shows a mix of agricultural fields in the center, a small settlement cluster to the east, and a forested patch along the western edge.",
+        "key_objects": [
+          "agricultural fields",
+          "settlement",
+          "forest"
+        ],
+        "execution_trace": [
+          {
+            "agent": "input_validator",
+            "status": "ok",
+            "detail": {
+              "query_len": 54,
+              "num_assets": 1
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "router",
+            "status": "ok",
+            "detail": {
+              "task_type": "vqa",
+              "raw": {
+                "task_type": "vqa",
+                "reasoning": "Groq qwen groq/compound-mini single-word",
+                "confidence": 0.9,
+                "_provider": "groq",
+                "_model": "groq/compound-mini"
+              }
+            },
+            "latency_ms": 1121
+          },
+          {
+            "agent": "planner",
+            "status": "ok",
+            "detail": {
+              "plan": {
+                "task_type": "vqa",
+                "reasoning": "The query requires generating a descriptive caption highlighting built-up areas and vegetation. The provided optical asset (img_001) contains RGB (B02, B03, B04) and NIR (B08) bands, which are sufficient for distinguishing vegetation (via NIR/Red contrast) and built-up surfaces (via RGB spectral signatures). A single static image is adequate for this descriptive task, eliminating the need for temporal analysis or multi-modal fusion. The pipeline will involve spectral feature extraction, land cover classification/segmentation, and natural language generation focused on the requested themes.",
+                "required_assets": [
+                  "img_001"
+                ],
+                "fusion_needed": false,
+                "temporal_needed": false,
+                "confidence": 0.95,
+                "_provider": "groq",
+                "_model": "qwen/qwen3.6-27b",
+                "requires_coreg": false,
+                "tile_config": {
+                  "enabled": true,
+                  "size": 256,
+                  "overlap_px": 32
+                },
+                "data_requirements": {
+                  "temporal": "single",
+                  "bands": [
+                    "B2",
+                    "B3",
+                    "B4"
+                  ],
+                  "sar_pol": null
+                },
+                "steps": [
+                  "preprocessing",
+                  "vision_encoder",
+                  "fusion",
+                  "task_agent"
+                ],
+                "fusion_method": "late",
+                "sub_queries": null,
+                "spatial_aggregation": null
+              },
+              "requires_coreg": false,
+              "sub_queries": null,
+              "region": null
+            },
+            "latency_ms": 6079
+          },
+          {
+            "agent": "preprocessing",
+            "status": "ok",
+            "detail": {
+              "num_tiles": 1,
+              "coreg": {
+                "ssim": 1.0,
+                "residual": 0.0,
+                "method": "dummy_affine",
+                "passed": true,
+                "num_tiles": 1
+              },
+              "gsd_normalized": 10.0,
+              "spectral": {},
+              "roi": null
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_selector",
+            "status": "ok",
+            "detail": {
+              "encoder": "satmae",
+              "modalities": [
+                "optical"
+              ],
+              "task": "vqa"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_compat",
+            "status": "ok",
+            "detail": {
+              "encoder": "satmae",
+              "requires_coreg": false,
+              "band_reports": [
+                {
+                  "asset_id": "img_001",
+                  "bands": [
+                    "B02",
+                    "B03",
+                    "B04",
+                    "B08"
+                  ],
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": true,
+                  "note": ""
+                }
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "coreg_gate",
+            "status": "skipped",
+            "detail": {
+              "reason": "requires_coreg=false (single-image VQA/grounding/captioning) bypass",
+              "task_type": "vqa"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "vision_encoder",
+            "status": "ok",
+            "detail": {
+              "encoder": "satmae",
+              "num_tiles": 1,
+              "embed_keys": [
+                "satmae"
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "fusion",
+            "status": "ok",
+            "detail": {
+              "method": "attention",
+              "confidence": 0.86,
+              "dim": 768
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "task_agent",
+            "status": "ok",
+            "detail": {
+              "task": "vqa",
+              "confidence": 0.87,
+              "sub_queries": 0,
+              "has_numeric": false
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "tile_manager",
+            "status": "ok",
+            "detail": {
+              "counts": {
+                "pending": 0,
+                "done": 1,
+                "failed": 0
+              },
+              "num_tiles": 1
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "post_processing",
+            "status": "ok",
+            "detail": {
+              "confidence": 0.87,
+              "has_chart": true,
+              "stitched": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "response_composer",
+            "status": "ok",
+            "detail": {
+              "composed_len": 2600,
+              "followups": 3,
+              "version": 1
+            },
+            "latency_ms": 10941
+          }
+        ],
+        "crs": "EPSG:4326",
+        "acquisition_dates": [],
+        "coreg_passed": true,
+        "encoder_used": "satmae",
+        "fusion_method": "late",
+        "chart_spec": {
+          "type": "donut",
+          "title": "Land-cover confidence",
+          "data": [
+            {
+              "name": "Agricultural Fields",
+              "value": 0.87
+            },
+            {
+              "name": "Settlement",
+              "value": 0.75
+            },
+            {
+              "name": "Forest",
+              "value": 0.63
+            }
+          ],
+          "unit": "%",
+          "note": "RS-VQA \u2022 data-driven"
+        },
+        "output_format": "json",
+        "composed_by": "qwen3.5-9b",
+        "chart_prompt_fragment": "CHART RULES \u2014 if your answer contains numbers, emit ONE ```chart block after the narrative, before the table:\n- Type: bar (default) / donut for 2-4 proportional slices / area|line for temporal / radia...",
+        "followup_suggestions": [
+          "Count the built-up clusters?",
+          "Where is water relative to forest?",
+          "Generate a GeoJSON for this land-cover?"
+        ],
+        "confidence_explanation": "High confidence based on clear spectral contrast; coreg passed (SSIM\u22650.75); encoder satmae.",
+        "composer_version": 1,
+        "_session_id": "complete_demo_04_captioning"
+      },
+      "execution_trace": [
+        {
+          "agent": "input_validator",
+          "status": "ok",
+          "detail": {
+            "query_len": 54,
+            "num_assets": 1
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "router",
+          "status": "ok",
+          "detail": {
+            "task_type": "vqa",
+            "raw": {
+              "task_type": "vqa",
+              "reasoning": "Groq qwen groq/compound-mini single-word",
+              "confidence": 0.9,
+              "_provider": "groq",
+              "_model": "groq/compound-mini"
+            }
+          },
+          "latency_ms": 1121
+        },
+        {
+          "agent": "planner",
+          "status": "ok",
+          "detail": {
+            "plan": {
+              "task_type": "vqa",
+              "reasoning": "The query requires generating a descriptive caption highlighting built-up areas and vegetation. The provided optical asset (img_001) contains RGB (B02, B03, B04) and NIR (B08) bands, which are sufficient for distinguishing vegetation (via NIR/Red contrast) and built-up surfaces (via RGB spectral signatures). A single static image is adequate for this descriptive task, eliminating the need for temporal analysis or multi-modal fusion. The pipeline will involve spectral feature extraction, land cover classification/segmentation, and natural language generation focused on the requested themes.",
+              "required_assets": [
+                "img_001"
+              ],
+              "fusion_needed": false,
+              "temporal_needed": false,
+              "confidence": 0.95,
+              "_provider": "groq",
+              "_model": "qwen/qwen3.6-27b",
+              "requires_coreg": false,
+              "tile_config": {
+                "enabled": true,
+                "size": 256,
+                "overlap_px": 32
+              },
+              "data_requirements": {
+                "temporal": "single",
+                "bands": [
+                  "B2",
+                  "B3",
+                  "B4"
+                ],
+                "sar_pol": null
+              },
+              "steps": [
+                "preprocessing",
+                "vision_encoder",
+                "fusion",
+                "task_agent"
+              ],
+              "fusion_method": "late",
+              "sub_queries": null,
+              "spatial_aggregation": null
+            },
+            "requires_coreg": false,
+            "sub_queries": null,
+            "region": null
+          },
+          "latency_ms": 6079
+        },
+        {
+          "agent": "preprocessing",
+          "status": "ok",
+          "detail": {
+            "num_tiles": 1,
+            "coreg": {
+              "ssim": 1.0,
+              "residual": 0.0,
+              "method": "dummy_affine",
+              "passed": true,
+              "num_tiles": 1
+            },
+            "gsd_normalized": 10.0,
+            "spectral": {},
+            "roi": null
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_selector",
+          "status": "ok",
+          "detail": {
+            "encoder": "satmae",
+            "modalities": [
+              "optical"
+            ],
+            "task": "vqa"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_compat",
+          "status": "ok",
+          "detail": {
+            "encoder": "satmae",
+            "requires_coreg": false,
+            "band_reports": [
+              {
+                "asset_id": "img_001",
+                "bands": [
+                  "B02",
+                  "B03",
+                  "B04",
+                  "B08"
+                ],
+                "available": true,
+                "missing": [],
+                "substitute_possible": true,
+                "note": ""
+              }
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "coreg_gate",
+          "status": "skipped",
+          "detail": {
+            "reason": "requires_coreg=false (single-image VQA/grounding/captioning) bypass",
+            "task_type": "vqa"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "vision_encoder",
+          "status": "ok",
+          "detail": {
+            "encoder": "satmae",
+            "num_tiles": 1,
+            "embed_keys": [
+              "satmae"
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "fusion",
+          "status": "ok",
+          "detail": {
+            "method": "attention",
+            "confidence": 0.86,
+            "dim": 768
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "task_agent",
+          "status": "ok",
+          "detail": {
+            "task": "vqa",
+            "confidence": 0.87,
+            "sub_queries": 0,
+            "has_numeric": false
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "tile_manager",
+          "status": "ok",
+          "detail": {
+            "counts": {
+              "pending": 0,
+              "done": 1,
+              "failed": 0
+            },
+            "num_tiles": 1
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "post_processing",
+          "status": "ok",
+          "detail": {
+            "confidence": 0.87,
+            "has_chart": true,
+            "stitched": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "response_composer",
+          "status": "ok",
+          "detail": {
+            "composed_len": 2600,
+            "followups": 3,
+            "version": 1
+          },
+          "latency_ms": 10941
+        }
+      ],
+      "error_log": [],
+      "elapsed_s": 18.16
+    },
+    {
+      "case": "followup_conversation",
+      "expected_task": "change_vqa",
+      "sensor": null,
+      "input": {
+        "session_id": "demo_followup_001",
+        "query": "What about the northern region?",
+        "assets": [
+          {
+            "asset_id": "img_2021",
+            "crs": "EPSG:32617"
+          },
+          {
+            "asset_id": "img_2023",
+            "crs": "EPSG:32617"
+          }
+        ],
+        "image_ids": [
+          "img_2021",
+          "img_2023"
+        ]
+      },
+      "routing": {
+        "task_type": "change_vqa",
+        "query_analysis": {
+          "temporal": {
+            "has_before_after": true,
+            "has_dates": false,
+            "has_change_verb": false,
+            "date_mentions": [],
+            "is_temporal": true
+          },
+          "spatial": {
+            "has_bbox_mention": false,
+            "has_region_name": true,
+            "region": null,
+            "has_spatial": true
+          },
+          "comparison": {
+            "is_comparison": false,
+            "entities": []
+          }
+        },
+        "is_followup": true,
+        "followup_anchor": "complete_demo_02_change_vqa",
+        "followup_resolved": true
+      },
+      "plan": {
+        "task_type": "change_vqa",
+        "reasoning": "The query asks about changes in the northern region, referencing two historical images (img_2021 and img_2023) from a previous change_vqa task. Both assets are required to perform a temporal comparison and answer the VQA prompt regarding regional changes over the two-year period.",
+        "required_assets": [
+          "img_2021",
+          "img_2023"
+        ],
+        "fusion_needed": false,
+        "temporal_needed": true,
+        "confidence": 0.95,
+        "_provider": "groq",
+        "_model": "qwen/qwen3.6-27b",
+        "requires_coreg": true,
+        "tile_config": {
+          "enabled": true,
+          "size": 256,
+          "overlap_px": 32
+        },
+        "data_requirements": {
+          "temporal": "multi",
+          "bands": [
+            "B2",
+            "B3",
+            "B4"
+          ],
+          "sar_pol": null
+        },
+        "steps": [
+          "preprocessing",
+          "vision_encoder",
+          "fusion",
+          "task_agent"
+        ],
+        "fusion_method": "late",
+        "sub_queries": null,
+        "spatial_aggregation": null
+      },
+      "region_of_interest": null,
+      "sub_queries": null,
+      "encoder": "prithvi",
+      "coreg": {
+        "ssim": 0.924,
+        "residual": 0.361,
+        "method": "dummy_affine",
+        "passed": true,
+        "num_tiles": 4
+      },
+      "coreg_passed": true,
+      "requires_coreg": true,
+      "spectral_indices": null,
+      "tiles": [
+        {
+          "tile_id": "img_2021_tile_0",
+          "asset_id": "img_2021",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000121.6768355
+        },
+        {
+          "tile_id": "img_2021_tile_1",
+          "asset_id": "img_2021",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000121.6768355
+        },
+        {
+          "tile_id": "img_2023_tile_0",
+          "asset_id": "img_2023",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000121.6768355
+        },
+        {
+          "tile_id": "img_2023_tile_1",
+          "asset_id": "img_2023",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000121.6768355
+        }
+      ],
+      "embeddings_meta": {
+        "prithvi": {
+          "count": 4,
+          "dim": 768
+        }
+      },
+      "fused_repr_meta": {
+        "fusion_method": "attention",
+        "confidence": 0.91,
+        "dim": 768
+      },
+      "task_output": {
+        "task": "change_vqa",
+        "query": "What about the northern region? [previous image_ids: img_2021,img_2023] [previous task: change_vqa]",
+        "image_t1_id": "img_2021",
+        "image_t2_id": "img_2023",
+        "answer_text": "Built-up area has expanded along the eastern edge, replacing what was previously bare soil.",
+        "change_categories": [
+          "built-up_increase"
+        ],
+        "change_magnitude_pct": 13.0,
+        "severity": "moderate",
+        "change_mask_rle": null,
+        "confidence": 0.87,
+        "answer_numeric": 13.0,
+        "answer_unit": "percent",
+        "answer_temporal_ref": "2021-2023",
+        "per_tile_confidence": {
+          "img_2021_tile_0": 0.85,
+          "img_2023_tile_0": 0.87
+        }
+      },
+      "final_result": {
+        "task": "change_vqa",
+        "query": "What about the northern region? [previous image_ids: img_2021,img_2023] [previous task: change_vqa]",
+        "image_t1_id": "img_2021",
+        "image_t2_id": "img_2023",
+        "answer_text": "\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** Satiq's response composer.\n    *   **Goal:** Fuse tool outputs into a final answer.\n    *   **Query:** \"What about the northern region?\"\n    *   **Context:** Previous image IDs `img_2021`, `img_2023`. Previous task `change_vqa`.\n    *   **Task Output:**\n        *   `answer_text`: \"Built-up area has expanded along the eastern edge, replacing what was previously bare soil.\"\n        *   `change_categories`: [\"built-up_increase\"]\n        *   `change_magnitude_pct`: 13.0\n        *   `severity`: \"moderate\"\n        *   `confidence`: 0.87\n        *   `answer_numeric`: 13.0\n        *   `answer_unit`: \"percent\"\n        *   `answer_temporal_ref`: \"2021-2023\"\n        *   `execution_trace`: Shows successful processing, coregistration (SSIM 0.924), vision encoding, fusion, and task agent execution.\n    *   **Constraints:** Concise markdown, > confidence, bbox if present, evidence summary. Under 400 words.\n\n2.  **Evaluate the Output vs. Query:**\n    *   The query asks about the \"northern region\".\n    *   The `answer_text` says: \"Built-up area has expanded along the *eastern edge*...\"\n    *   *Discrepancy Check:* The tool output mentions the \"eastern edge\" while the user asked about the \"northern region\".\n    *   *Interpretation:* Often in these automated systems, the \"answer_text\" might be a general summary of the most significant change detected across the whole image or the specific region of interest defined by the system's internal logic (which might differ from the user's specific directional query if the system didn't strictly segment by \"north\"). However, looking at the `answer_text`, it explicitly mentions \"eastern edge\".\n    *   *Refinement:* I need to report what the tool found. If the tool found changes in the eastern edge, I should report that. However, the user asked about the *northern* region.\n    *   *Hypothesis:* The tool might have analyzed the whole image or a specific tile that corresponds to the \"northern region\" in the user's mind, but the description says \"eastern edge\". Or, the \"northern region\" *is* the area where the eastern edge expansion is happening relative to a specific feature.\n    *   *Safe Approach:* Report the findings provided by the tool (`answer_text`) but acknowledge the query context. The tool output is the ground truth",
+        "change_categories": [
+          "built-up_increase"
+        ],
+        "change_magnitude_pct": 13.0,
+        "severity": "moderate",
+        "change_mask_rle": null,
+        "confidence": 0.87,
+        "answer_numeric": 13.0,
+        "answer_unit": "percent",
+        "answer_temporal_ref": "2021-2023",
+        "per_tile_confidence": {
+          "img_2021_tile_0": 0.85,
+          "img_2023_tile_0": 0.87
+        },
+        "execution_trace": [
+          {
+            "agent": "input_validator",
+            "status": "ok",
+            "detail": {
+              "query_len": 31,
+              "num_assets": 2
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "router",
+            "status": "ok",
+            "detail": {
+              "task_type": "change_vqa",
+              "raw": {
+                "task_type": "change_vqa",
+                "reasoning": "Groq qwen groq/compound-mini single-word",
+                "confidence": 0.9,
+                "_provider": "groq",
+                "_model": "groq/compound-mini"
+              }
+            },
+            "latency_ms": 1071
+          },
+          {
+            "agent": "planner",
+            "status": "ok",
+            "detail": {
+              "plan": {
+                "task_type": "change_vqa",
+                "reasoning": "The query asks about changes in the northern region, referencing two historical images (img_2021 and img_2023) from a previous change_vqa task. Both assets are required to perform a temporal comparison and answer the VQA prompt regarding regional changes over the two-year period.",
+                "required_assets": [
+                  "img_2021",
+                  "img_2023"
+                ],
+                "fusion_needed": false,
+                "temporal_needed": true,
+                "confidence": 0.95,
+                "_provider": "groq",
+                "_model": "qwen/qwen3.6-27b",
+                "requires_coreg": true,
+                "tile_config": {
+                  "enabled": true,
+                  "size": 256,
+                  "overlap_px": 32
+                },
+                "data_requirements": {
+                  "temporal": "multi",
+                  "bands": [
+                    "B2",
+                    "B3",
+                    "B4"
+                  ],
+                  "sar_pol": null
+                },
+                "steps": [
+                  "preprocessing",
+                  "vision_encoder",
+                  "fusion",
+                  "task_agent"
+                ],
+                "fusion_method": "late",
+                "sub_queries": null,
+                "spatial_aggregation": null
+              },
+              "requires_coreg": true,
+              "sub_queries": null,
+              "region": null
+            },
+            "latency_ms": 7084
+          },
+          {
+            "agent": "preprocessing",
+            "status": "ok",
+            "detail": {
+              "num_tiles": 4,
+              "coreg": {
+                "ssim": 0.924,
+                "residual": 0.361,
+                "method": "dummy_affine",
+                "passed": true,
+                "num_tiles": 4
+              },
+              "gsd_normalized": 10.0,
+              "spectral": {
+                "ndvi_mean": 0.42,
+                "ndwi_mean": -0.12,
+                "ndbi_mean": 0.18,
+                "evi_mean": 0.35
+              },
+              "roi": null
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_selector",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "modalities": [
+                "unknown",
+                "unknown"
+              ],
+              "task": "change_vqa"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_compat",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "requires_coreg": true,
+              "band_reports": [
+                {
+                  "asset_id": "img_2021",
+                  "bands": null,
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": false,
+                  "note": "no band metadata, assume available (dummy)"
+                },
+                {
+                  "asset_id": "img_2023",
+                  "bands": null,
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": false,
+                  "note": "no band metadata, assume available (dummy)"
+                }
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "coreg_gate",
+            "status": "ok",
+            "detail": {
+              "ssim": 0.924,
+              "residual": 0.361
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "vision_encoder",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "num_tiles": 4,
+              "embed_keys": [
+                "prithvi"
+              ]
+            },
+            "latency_ms": 5
+          },
+          {
+            "agent": "fusion",
+            "status": "ok",
+            "detail": {
+              "method": "attention",
+              "confidence": 0.91,
+              "dim": 768
+            },
+            "latency_ms": 2
+          },
+          {
+            "agent": "task_agent",
+            "status": "ok",
+            "detail": {
+              "task": "change_vqa",
+              "confidence": 0.87,
+              "sub_queries": 0,
+              "has_numeric": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "tile_manager",
+            "status": "ok",
+            "detail": {
+              "counts": {
+                "pending": 0,
+                "done": 4,
+                "failed": 0
+              },
+              "num_tiles": 4
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "post_processing",
+            "status": "ok",
+            "detail": {
+              "confidence": 0.87,
+              "has_chart": true,
+              "stitched": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "response_composer",
+            "status": "ok",
+            "detail": {
+              "composed_len": 2359,
+              "followups": 3,
+              "version": 1
+            },
+            "latency_ms": 11956
+          }
+        ],
+        "crs": "EPSG:4326",
+        "acquisition_dates": [],
+        "coreg_passed": true,
+        "encoder_used": "prithvi",
+        "fusion_method": "late",
+        "chart_spec": {
+          "type": "bar",
+          "title": "Change by category (ha)",
+          "data": [
+            {
+              "name": "built-up increase",
+              "value": 19.45
+            }
+          ],
+          "unit": "ha",
+          "note": "Change-VQA \u2022 per-category magnitude"
+        },
+        "output_format": "json",
+        "composed_by": "qwen3.5-9b",
+        "chart_prompt_fragment": "CHART RULES \u2014 if your answer contains numbers, emit ONE ```chart block after the narrative, before the table:\n- Type: bar (default) / donut for 2-4 proportional slices / area|line for temporal / radia...",
+        "followup_suggestions": [
+          "Show built-up_increase magnitude as chart?",
+          "By how many ha did built-up increase per sector?",
+          "Show change mask as GeoJSON?"
+        ],
+        "confidence_explanation": "High confidence based on clear spectral contrast; coreg passed (SSIM\u22650.75); encoder prithvi.",
+        "composer_version": 1,
+        "_session_id": "demo_followup_001"
+      },
+      "execution_trace": [
+        {
+          "agent": "input_validator",
+          "status": "ok",
+          "detail": {
+            "query_len": 31,
+            "num_assets": 2
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "router",
+          "status": "ok",
+          "detail": {
+            "task_type": "change_vqa",
+            "raw": {
+              "task_type": "change_vqa",
+              "reasoning": "Groq qwen groq/compound-mini single-word",
+              "confidence": 0.9,
+              "_provider": "groq",
+              "_model": "groq/compound-mini"
+            }
+          },
+          "latency_ms": 1071
+        },
+        {
+          "agent": "planner",
+          "status": "ok",
+          "detail": {
+            "plan": {
+              "task_type": "change_vqa",
+              "reasoning": "The query asks about changes in the northern region, referencing two historical images (img_2021 and img_2023) from a previous change_vqa task. Both assets are required to perform a temporal comparison and answer the VQA prompt regarding regional changes over the two-year period.",
+              "required_assets": [
+                "img_2021",
+                "img_2023"
+              ],
+              "fusion_needed": false,
+              "temporal_needed": true,
+              "confidence": 0.95,
+              "_provider": "groq",
+              "_model": "qwen/qwen3.6-27b",
+              "requires_coreg": true,
+              "tile_config": {
+                "enabled": true,
+                "size": 256,
+                "overlap_px": 32
+              },
+              "data_requirements": {
+                "temporal": "multi",
+                "bands": [
+                  "B2",
+                  "B3",
+                  "B4"
+                ],
+                "sar_pol": null
+              },
+              "steps": [
+                "preprocessing",
+                "vision_encoder",
+                "fusion",
+                "task_agent"
+              ],
+              "fusion_method": "late",
+              "sub_queries": null,
+              "spatial_aggregation": null
+            },
+            "requires_coreg": true,
+            "sub_queries": null,
+            "region": null
+          },
+          "latency_ms": 7084
+        },
+        {
+          "agent": "preprocessing",
+          "status": "ok",
+          "detail": {
+            "num_tiles": 4,
+            "coreg": {
+              "ssim": 0.924,
+              "residual": 0.361,
+              "method": "dummy_affine",
+              "passed": true,
+              "num_tiles": 4
+            },
+            "gsd_normalized": 10.0,
+            "spectral": {
+              "ndvi_mean": 0.42,
+              "ndwi_mean": -0.12,
+              "ndbi_mean": 0.18,
+              "evi_mean": 0.35
+            },
+            "roi": null
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_selector",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "modalities": [
+              "unknown",
+              "unknown"
+            ],
+            "task": "change_vqa"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_compat",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "requires_coreg": true,
+            "band_reports": [
+              {
+                "asset_id": "img_2021",
+                "bands": null,
+                "available": true,
+                "missing": [],
+                "substitute_possible": false,
+                "note": "no band metadata, assume available (dummy)"
+              },
+              {
+                "asset_id": "img_2023",
+                "bands": null,
+                "available": true,
+                "missing": [],
+                "substitute_possible": false,
+                "note": "no band metadata, assume available (dummy)"
+              }
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "coreg_gate",
+          "status": "ok",
+          "detail": {
+            "ssim": 0.924,
+            "residual": 0.361
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "vision_encoder",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "num_tiles": 4,
+            "embed_keys": [
+              "prithvi"
+            ]
+          },
+          "latency_ms": 5
+        },
+        {
+          "agent": "fusion",
+          "status": "ok",
+          "detail": {
+            "method": "attention",
+            "confidence": 0.91,
+            "dim": 768
+          },
+          "latency_ms": 2
+        },
+        {
+          "agent": "task_agent",
+          "status": "ok",
+          "detail": {
+            "task": "change_vqa",
+            "confidence": 0.87,
+            "sub_queries": 0,
+            "has_numeric": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "tile_manager",
+          "status": "ok",
+          "detail": {
+            "counts": {
+              "pending": 0,
+              "done": 4,
+              "failed": 0
+            },
+            "num_tiles": 4
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "post_processing",
+          "status": "ok",
+          "detail": {
+            "confidence": 0.87,
+            "has_chart": true,
+            "stitched": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "response_composer",
+          "status": "ok",
+          "detail": {
+            "composed_len": 2359,
+            "followups": 3,
+            "version": 1
+          },
+          "latency_ms": 11956
+        }
+      ],
+      "error_log": [],
+      "elapsed_s": 20.165
+    },
+    {
+      "case": "sub_query_multi_part",
+      "expected_task": "change_vqa",
+      "sensor": null,
+      "input": {
+        "session_id": "complete_demo_06_sub_query_multi_part",
+        "query": "Where changed AND how much did it change?",
+        "assets": [
+          {
+            "asset_id": "img_2021",
+            "crs": "EPSG:32617"
+          },
+          {
+            "asset_id": "img_2023",
+            "crs": "EPSG:32617"
+          }
+        ],
+        "image_ids": [
+          "img_2021",
+          "img_2023"
+        ]
+      },
+      "routing": {
+        "task_type": "change_vqa",
+        "query_analysis": {
+          "temporal": {
+            "has_before_after": false,
+            "has_dates": false,
+            "has_change_verb": true,
+            "date_mentions": [],
+            "is_temporal": true
+          },
+          "spatial": {
+            "has_bbox_mention": false,
+            "has_region_name": false,
+            "region": null,
+            "has_spatial": false
+          },
+          "comparison": {
+            "is_comparison": false,
+            "entities": []
+          }
+        },
+        "is_followup": false,
+        "followup_anchor": null,
+        "followup_resolved": false
+      },
+      "plan": {
+        "task_type": "change_vqa",
+        "reasoning": "The query requires identifying spatial locations of change and quantifying the magnitude of change between two time points. The provided assets are two images from different years (2021 and 2023) with matching CRS, making them suitable for direct temporal comparison. No multi-sensor fusion is required, but temporal analysis is essential to compute differences and answer both parts of the query.",
+        "required_assets": [
+          "img_2021",
+          "img_2023"
+        ],
+        "fusion_needed": false,
+        "temporal_needed": true,
+        "confidence": 0.95,
+        "_provider": "groq",
+        "_model": "qwen/qwen3.6-27b",
+        "requires_coreg": true,
+        "tile_config": {
+          "enabled": true,
+          "size": 256,
+          "overlap_px": 32
+        },
+        "data_requirements": {
+          "temporal": "multi",
+          "bands": [
+            "B2",
+            "B3",
+            "B4"
+          ],
+          "sar_pol": null
+        },
+        "steps": [
+          "preprocessing",
+          "vision_encoder",
+          "fusion",
+          "task_agent"
+        ],
+        "fusion_method": "late",
+        "sub_queries": [
+          "Where changed",
+          "how much did it change?"
+        ],
+        "spatial_aggregation": null
+      },
+      "region_of_interest": null,
+      "sub_queries": [
+        "Where changed",
+        "how much did it change?"
+      ],
+      "encoder": "prithvi",
+      "coreg": {
+        "ssim": 0.885,
+        "residual": 0.141,
+        "method": "dummy_affine",
+        "passed": true,
+        "num_tiles": 4
+      },
+      "coreg_passed": true,
+      "requires_coreg": true,
+      "spectral_indices": null,
+      "tiles": [
+        {
+          "tile_id": "img_2021_tile_0",
+          "asset_id": "img_2021",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000140.7896307
+        },
+        {
+          "tile_id": "img_2021_tile_1",
+          "asset_id": "img_2021",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000140.7896307
+        },
+        {
+          "tile_id": "img_2023_tile_0",
+          "asset_id": "img_2023",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000140.7896307
+        },
+        {
+          "tile_id": "img_2023_tile_1",
+          "asset_id": "img_2023",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "updated_at": 1788000140.7896307
+        }
+      ],
+      "embeddings_meta": {
+        "prithvi": {
+          "count": 4,
+          "dim": 768
+        }
+      },
+      "fused_repr_meta": {
+        "fusion_method": "attention",
+        "confidence": 0.83,
+        "dim": 768
+      },
+      "task_output": {
+        "task": "change_vqa",
+        "query": "Where changed AND how much did it change?",
+        "image_t1_id": "img_2021",
+        "image_t2_id": "img_2023",
+        "answer_text": "### Part 1\nBuilt-up area has expanded along the eastern edge, replacing what was previously bare soil.\n\n### Part 2\nBuilt-up area has expanded along the eastern edge, replacing what was previously bare soil.",
+        "change_categories": [
+          "built-up_increase"
+        ],
+        "change_magnitude_pct": 20.27,
+        "severity": "high",
+        "change_mask_rle": null,
+        "confidence": 0.77,
+        "answer_numeric": 20.27,
+        "answer_unit": "percent",
+        "answer_temporal_ref": "2021-2023",
+        "per_tile_confidence": {
+          "img_2021_tile_0": 0.85,
+          "img_2023_tile_0": 0.87
+        },
+        "_merged_from": 2
+      },
+      "final_result": {
+        "task": "change_vqa",
+        "query": "Where changed AND how much did it change?",
+        "image_t1_id": "img_2021",
+        "image_t2_id": "img_2023",
+        "answer_text": "\n<think>\nHere's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Role:** Satiq's response composer. Fuse tool outputs into final answer.\n   - **Query:** \"Where changed AND how much did it change?\"\n   - **Task Output:** JSON containing:\n     - `task`: \"change_vqa\"\n     - `query`: \"Where changed AND how much did it change?\"\n     - `image_t1_id`: \"img_2021\", `image_t2_id`: \"img_2023\"\n     - `answer_text`: \"### Part 1\\nBuilt-up area has expanded along the eastern edge, replacing what was previously bare soil.\\n\\n### Part 2\\nBuilt-up area has expanded along the eastern edge, replacing what was previously bare soil.\" (Note: Part 1 and Part 2 are identical in the output, which is a bit odd, but I'll work with it. It clearly states the location and nature of change.)\n     - `change_categories`: [\"built-up_increase\"]\n     - `change_magnitude_pct`: 20.27\n     - `severity`: \"high\"\n     - `confidence`: 0.77\n     - `answer_numeric`: 20.27\n     - `answer_unit`: \"percent\"\n     - `answer_temporal_ref`: \"2021-2023\"\n     - `per_tile_confidence`: {\"img_2021_tile_0\": 0.85, \"img_2023_tile_0\": 0.87}\n     - `_merged_from`: 2\n     - `execution_trace`: Contains details about routing, planning, coregistration (SSIM: 0.885), vision encoder (Prithvi), fusion (attention), task agent, etc.\n   - **Constraints:** Write concise markdown answer with > confidence, bbox if present, and evidence summary. Keep under 400 words.\n\n2.  **Identify Key Information to Extract:**\n   - **Location of Change:** Eastern edge of the study area.\n   - **Nature of Change:** Built-up area expansion replacing bare soil.\n   - **Magnitude of Change:** 20.27% increase in built-up area.\n   - **Timeframe:** 2021 to 2023.\n   - **Confidence:** 0.77 (77%)\n   - **Severity:** High\n   - **Evidence/Method:** Coregistered images (SSIM: 0.885), Prithvi vision encoder, attention-based fusion, tile-based analysis (4 tiles processed).\n   - **Bounding Box:** Not explicitly provided in the JSON (`change_mask_rle` is null, no",
+        "change_categories": [
+          "built-up_increase"
+        ],
+        "change_magnitude_pct": 20.27,
+        "severity": "high",
+        "change_mask_rle": null,
+        "confidence": 0.77,
+        "answer_numeric": 20.27,
+        "answer_unit": "percent",
+        "answer_temporal_ref": "2021-2023",
+        "per_tile_confidence": {
+          "img_2021_tile_0": 0.85,
+          "img_2023_tile_0": 0.87
+        },
+        "_merged_from": 2,
+        "execution_trace": [
+          {
+            "agent": "input_validator",
+            "status": "ok",
+            "detail": {
+              "query_len": 41,
+              "num_assets": 2
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "router",
+            "status": "ok",
+            "detail": {
+              "task_type": "change_vqa",
+              "raw": {
+                "task_type": "change_vqa",
+                "reasoning": "Groq qwen groq/compound-mini single-word",
+                "confidence": 0.9,
+                "_provider": "groq",
+                "_model": "groq/compound-mini"
+              }
+            },
+            "latency_ms": 1037
+          },
+          {
+            "agent": "planner",
+            "status": "ok",
+            "detail": {
+              "plan": {
+                "task_type": "change_vqa",
+                "reasoning": "The query requires identifying spatial locations of change and quantifying the magnitude of change between two time points. The provided assets are two images from different years (2021 and 2023) with matching CRS, making them suitable for direct temporal comparison. No multi-sensor fusion is required, but temporal analysis is essential to compute differences and answer both parts of the query.",
+                "required_assets": [
+                  "img_2021",
+                  "img_2023"
+                ],
+                "fusion_needed": false,
+                "temporal_needed": true,
+                "confidence": 0.95,
+                "_provider": "groq",
+                "_model": "qwen/qwen3.6-27b",
+                "requires_coreg": true,
+                "tile_config": {
+                  "enabled": true,
+                  "size": 256,
+                  "overlap_px": 32
+                },
+                "data_requirements": {
+                  "temporal": "multi",
+                  "bands": [
+                    "B2",
+                    "B3",
+                    "B4"
+                  ],
+                  "sar_pol": null
+                },
+                "steps": [
+                  "preprocessing",
+                  "vision_encoder",
+                  "fusion",
+                  "task_agent"
+                ],
+                "fusion_method": "late",
+                "sub_queries": [
+                  "Where changed",
+                  "how much did it change?"
+                ],
+                "spatial_aggregation": null
+              },
+              "requires_coreg": true,
+              "sub_queries": [
+                "Where changed",
+                "how much did it change?"
+              ],
+              "region": null
+            },
+            "latency_ms": 6055
+          },
+          {
+            "agent": "preprocessing",
+            "status": "ok",
+            "detail": {
+              "num_tiles": 4,
+              "coreg": {
+                "ssim": 0.885,
+                "residual": 0.141,
+                "method": "dummy_affine",
+                "passed": true,
+                "num_tiles": 4
+              },
+              "gsd_normalized": 10.0,
+              "spectral": {
+                "ndvi_mean": 0.42,
+                "ndwi_mean": -0.12,
+                "ndbi_mean": 0.18,
+                "evi_mean": 0.35
+              },
+              "roi": null
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_selector",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "modalities": [
+                "unknown",
+                "unknown"
+              ],
+              "task": "change_vqa"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_compat",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "requires_coreg": true,
+              "band_reports": [
+                {
+                  "asset_id": "img_2021",
+                  "bands": null,
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": false,
+                  "note": "no band metadata, assume available (dummy)"
+                },
+                {
+                  "asset_id": "img_2023",
+                  "bands": null,
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": false,
+                  "note": "no band metadata, assume available (dummy)"
+                }
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "coreg_gate",
+            "status": "ok",
+            "detail": {
+              "ssim": 0.885,
+              "residual": 0.141
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "vision_encoder",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "num_tiles": 4,
+              "embed_keys": [
+                "prithvi"
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "fusion",
+            "status": "ok",
+            "detail": {
+              "method": "attention",
+              "confidence": 0.83,
+              "dim": 768
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "task_agent",
+            "status": "ok",
+            "detail": {
+              "task": "change_vqa",
+              "confidence": 0.77,
+              "sub_queries": 2,
+              "has_numeric": true
+            },
+            "latency_ms": 15
+          },
+          {
+            "agent": "tile_manager",
+            "status": "ok",
+            "detail": {
+              "counts": {
+                "pending": 0,
+                "done": 4,
+                "failed": 0
+              },
+              "num_tiles": 4
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "post_processing",
+            "status": "ok",
+            "detail": {
+              "confidence": 0.77,
+              "has_chart": true,
+              "stitched": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "response_composer",
+            "status": "ok",
+            "detail": {
+              "composed_len": 1992,
+              "followups": 3,
+              "version": 1
+            },
+            "latency_ms": 11890
+          }
+        ],
+        "crs": "EPSG:4326",
+        "acquisition_dates": [],
+        "coreg_passed": true,
+        "encoder_used": "prithvi",
+        "fusion_method": "late",
+        "chart_spec": {
+          "type": "bar",
+          "title": "Change by category (ha)",
+          "data": [
+            {
+              "name": "built-up increase",
+              "value": 30.32
+            }
+          ],
+          "unit": "ha",
+          "note": "Change-VQA \u2022 per-category magnitude"
+        },
+        "output_format": "json",
+        "composed_by": "qwen3.5-9b",
+        "chart_prompt_fragment": "CHART RULES \u2014 if your answer contains numbers, emit ONE ```chart block after the narrative, before the table:\n- Type: bar (default) / donut for 2-4 proportional slices / area|line for temporal / radia...",
+        "followup_suggestions": [
+          "Show built-up_increase magnitude as chart?",
+          "By how many ha did built-up increase per sector?",
+          "Show change mask as GeoJSON?"
+        ],
+        "confidence_explanation": "Moderate confidence \u2014 some ambiguity in tile evidence; coreg passed (SSIM\u22650.75); encoder prithvi.",
+        "composer_version": 1,
+        "_session_id": "complete_demo_06_sub_query_multi_part"
+      },
+      "execution_trace": [
+        {
+          "agent": "input_validator",
+          "status": "ok",
+          "detail": {
+            "query_len": 41,
+            "num_assets": 2
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "router",
+          "status": "ok",
+          "detail": {
+            "task_type": "change_vqa",
+            "raw": {
+              "task_type": "change_vqa",
+              "reasoning": "Groq qwen groq/compound-mini single-word",
+              "confidence": 0.9,
+              "_provider": "groq",
+              "_model": "groq/compound-mini"
+            }
+          },
+          "latency_ms": 1037
+        },
+        {
+          "agent": "planner",
+          "status": "ok",
+          "detail": {
+            "plan": {
+              "task_type": "change_vqa",
+              "reasoning": "The query requires identifying spatial locations of change and quantifying the magnitude of change between two time points. The provided assets are two images from different years (2021 and 2023) with matching CRS, making them suitable for direct temporal comparison. No multi-sensor fusion is required, but temporal analysis is essential to compute differences and answer both parts of the query.",
+              "required_assets": [
+                "img_2021",
+                "img_2023"
+              ],
+              "fusion_needed": false,
+              "temporal_needed": true,
+              "confidence": 0.95,
+              "_provider": "groq",
+              "_model": "qwen/qwen3.6-27b",
+              "requires_coreg": true,
+              "tile_config": {
+                "enabled": true,
+                "size": 256,
+                "overlap_px": 32
+              },
+              "data_requirements": {
+                "temporal": "multi",
+                "bands": [
+                  "B2",
+                  "B3",
+                  "B4"
+                ],
+                "sar_pol": null
+              },
+              "steps": [
+                "preprocessing",
+                "vision_encoder",
+                "fusion",
+                "task_agent"
+              ],
+              "fusion_method": "late",
+              "sub_queries": [
+                "Where changed",
+                "how much did it change?"
+              ],
+              "spatial_aggregation": null
+            },
+            "requires_coreg": true,
+            "sub_queries": [
+              "Where changed",
+              "how much did it change?"
+            ],
+            "region": null
+          },
+          "latency_ms": 6055
+        },
+        {
+          "agent": "preprocessing",
+          "status": "ok",
+          "detail": {
+            "num_tiles": 4,
+            "coreg": {
+              "ssim": 0.885,
+              "residual": 0.141,
+              "method": "dummy_affine",
+              "passed": true,
+              "num_tiles": 4
+            },
+            "gsd_normalized": 10.0,
+            "spectral": {
+              "ndvi_mean": 0.42,
+              "ndwi_mean": -0.12,
+              "ndbi_mean": 0.18,
+              "evi_mean": 0.35
+            },
+            "roi": null
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_selector",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "modalities": [
+              "unknown",
+              "unknown"
+            ],
+            "task": "change_vqa"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_compat",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "requires_coreg": true,
+            "band_reports": [
+              {
+                "asset_id": "img_2021",
+                "bands": null,
+                "available": true,
+                "missing": [],
+                "substitute_possible": false,
+                "note": "no band metadata, assume available (dummy)"
+              },
+              {
+                "asset_id": "img_2023",
+                "bands": null,
+                "available": true,
+                "missing": [],
+                "substitute_possible": false,
+                "note": "no band metadata, assume available (dummy)"
+              }
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "coreg_gate",
+          "status": "ok",
+          "detail": {
+            "ssim": 0.885,
+            "residual": 0.141
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "vision_encoder",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "num_tiles": 4,
+            "embed_keys": [
+              "prithvi"
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "fusion",
+          "status": "ok",
+          "detail": {
+            "method": "attention",
+            "confidence": 0.83,
+            "dim": 768
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "task_agent",
+          "status": "ok",
+          "detail": {
+            "task": "change_vqa",
+            "confidence": 0.77,
+            "sub_queries": 2,
+            "has_numeric": true
+          },
+          "latency_ms": 15
+        },
+        {
+          "agent": "tile_manager",
+          "status": "ok",
+          "detail": {
+            "counts": {
+              "pending": 0,
+              "done": 4,
+              "failed": 0
+            },
+            "num_tiles": 4
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "post_processing",
+          "status": "ok",
+          "detail": {
+            "confidence": 0.77,
+            "has_chart": true,
+            "stitched": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "response_composer",
+          "status": "ok",
+          "detail": {
+            "composed_len": 1992,
+            "followups": 3,
+            "version": 1
+          },
+          "latency_ms": 11890
+        }
+      ],
+      "error_log": [],
+      "elapsed_s": 19.038
+    },
+    {
+      "case": "region_geocoded",
+      "expected_task": "change_vqa",
+      "sensor": null,
+      "input": {
+        "session_id": "complete_demo_07_region_geocoded",
+        "query": "Describe change in Sector A",
+        "assets": [
+          {
+            "asset_id": "img_2021",
+            "crs": "EPSG:32617"
+          },
+          {
+            "asset_id": "img_2023",
+            "crs": "EPSG:32617"
+          }
+        ],
+        "image_ids": [
+          "img_2021",
+          "img_2023"
+        ]
+      },
+      "routing": {
+        "task_type": "change_vqa",
+        "query_analysis": {
+          "temporal": {
+            "has_before_after": false,
+            "has_dates": false,
+            "has_change_verb": true,
+            "date_mentions": [],
+            "is_temporal": true
+          },
+          "spatial": {
+            "has_bbox_mention": false,
+            "has_region_name": true,
+            "region": "Sector",
+            "has_spatial": true
+          },
+          "comparison": {
+            "is_comparison": false,
+            "entities": []
+          }
+        },
+        "is_followup": false,
+        "followup_anchor": null,
+        "followup_resolved": false
+      },
+      "plan": {
+        "task_type": "change_vqa",
+        "reasoning": "The query requires identifying and describing changes in a specific region (Sector A) between two time points. Both provided assets (img_2021 and img_2023) are necessary to perform temporal comparison and change detection. The matching CRS ensures direct spatial alignment for accurate analysis.",
+        "required_assets": [
+          "img_2021",
+          "img_2023"
+        ],
+        "fusion_needed": false,
+        "temporal_needed": true,
+        "confidence": 0.95,
+        "_provider": "groq",
+        "_model": "qwen/qwen3.6-27b",
+        "requires_coreg": true,
+        "tile_config": {
+          "enabled": true,
+          "size": 256,
+          "overlap_px": 32
+        },
+        "data_requirements": {
+          "temporal": "multi",
+          "bands": [
+            "B2",
+            "B3",
+            "B4"
+          ],
+          "sar_pol": null
+        },
+        "steps": [
+          "preprocessing",
+          "vision_encoder",
+          "fusion",
+          "task_agent"
+        ],
+        "fusion_method": "late",
+        "sub_queries": null,
+        "spatial_aggregation": null,
+        "region_of_interest": {
+          "region": "Sector",
+          "bbox": [
+            79.0,
+            12.0,
+            79.5,
+            12.5
+          ],
+          "crs": "EPSG:4326"
+        }
+      },
+      "region_of_interest": {
+        "region": "Sector",
+        "bbox": [
+          79.0,
+          12.0,
+          79.5,
+          12.5
+        ],
+        "crs": "EPSG:4326"
+      },
+      "sub_queries": null,
+      "encoder": "prithvi",
+      "coreg": {
+        "ssim": 0.922,
+        "residual": 0.239,
+        "method": "dummy_affine",
+        "passed": true,
+        "num_tiles": 4
+      },
+      "coreg_passed": true,
+      "requires_coreg": true,
+      "spectral_indices": null,
+      "tiles": [
+        {
+          "tile_id": "img_2021_tile_0",
+          "asset_id": "img_2021",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "roi": "Sector",
+          "roi_bbox": [
+            79.0,
+            12.0,
+            79.5,
+            12.5
+          ],
+          "updated_at": 1788000159.9187424
+        },
+        {
+          "tile_id": "img_2021_tile_1",
+          "asset_id": "img_2021",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "roi": "Sector",
+          "roi_bbox": [
+            79.0,
+            12.0,
+            79.5,
+            12.5
+          ],
+          "updated_at": 1788000159.9187424
+        },
+        {
+          "tile_id": "img_2023_tile_0",
+          "asset_id": "img_2023",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "roi": "Sector",
+          "roi_bbox": [
+            79.0,
+            12.0,
+            79.5,
+            12.5
+          ],
+          "updated_at": 1788000159.9187424
+        },
+        {
+          "tile_id": "img_2023_tile_1",
+          "asset_id": "img_2023",
+          "bbox": [
+            0,
+            0,
+            256,
+            256
+          ],
+          "modality": "optical",
+          "status": "done",
+          "roi": "Sector",
+          "roi_bbox": [
+            79.0,
+            12.0,
+            79.5,
+            12.5
+          ],
+          "updated_at": 1788000159.9187424
+        }
+      ],
+      "embeddings_meta": {
+        "prithvi": {
+          "count": 4,
+          "dim": 768
+        }
+      },
+      "fused_repr_meta": {
+        "fusion_method": "attention",
+        "confidence": 0.89,
+        "dim": 768
+      },
+      "task_output": {
+        "task": "change_vqa",
+        "query": "Describe change in Sector A",
+        "image_t1_id": "img_2021",
+        "image_t2_id": "img_2023",
+        "answer_text": "Built-up area has expanded along the eastern edge, replacing what was previously bare soil.",
+        "change_categories": [
+          "built-up_increase"
+        ],
+        "change_magnitude_pct": 12.61,
+        "severity": "moderate",
+        "change_mask_rle": null,
+        "confidence": 0.8,
+        "answer_numeric": 12.61,
+        "answer_unit": "percent",
+        "answer_temporal_ref": "2021-2023",
+        "per_tile_confidence": {
+          "img_2021_tile_0": 0.78,
+          "img_2023_tile_0": 0.8
+        }
+      },
+      "final_result": {
+        "task": "change_vqa",
+        "query": "Describe change in Sector A",
+        "image_t1_id": "img_2021",
+        "image_t2_id": "img_2023",
+        "answer_text": "\n<think>\nHere's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Role:** Satiq's response composer. Fuse tool outputs into final answer.\n   - **Query:** Describe change in Sector A\n   - **Task Output:** JSON containing:\n     - `task`: \"change_vqa\"\n     - `query`: \"Describe change in Sector A\"\n     - `image_t1_id`: \"img_2021\"\n     - `image_t2_id`: \"img_2023\"\n     - `answer_text`: \"Built-up area has expanded along the eastern edge, replacing what was previously bare soil.\"\n     - `change_categories`: [\"built-up_increase\"]\n     - `change_magnitude_pct`: 12.61\n     - `severity`: \"moderate\"\n     - `confidence`: 0.8\n     - `answer_numeric`: 12.61\n     - `answer_unit`: \"percent\"\n     - `answer_temporal_ref`: \"2021-2023\"\n     - `per_tile_confidence`: {\"img_2021_tile_0\": 0.78, \"img_2023_tile_0\": 0.8}\n     - `execution_trace`: Contains details about agents, planning, region of interest bbox: `[79.0, 12.0, 79.5, 12.5]`, CRS: \"EPSG:4326\", etc.\n   - **Constraints:** Write concise markdown answer with > confidence, bbox if present, and evidence summary. Keep under 400 words.\n\n2.  **Extract Key Information:**\n   - **Change Description:** Built-up area expanded along the eastern edge, replacing bare soil.\n   - **Category:** Built-up increase\n   - **Magnitude:** 12.61%\n   - **Severity:** Moderate\n   - **Temporal Reference:** 2021-2023\n   - **Confidence:** 0.8 (80%)\n   - **Bounding Box:** [79.0, 12.0, 79.5, 12.5] (EPSG:4326)\n   - **Evidence/Method:** Multi-temporal comparison of satellite imagery (img_2021 vs img_2023), coregistration (SSIM: 0.922), vision encoding (Prithvi), attention-based fusion, tile-based analysis (4 tiles).\n\n3.  **Structure the Response (Markdown):**\n   - Start with a direct answer summarizing the change.\n   - Include confidence level.\n   - Include bounding box coordinates.\n   - Provide an evidence summary (methodology",
+        "change_categories": [
+          "built-up_increase"
+        ],
+        "change_magnitude_pct": 12.61,
+        "severity": "moderate",
+        "change_mask_rle": null,
+        "confidence": 0.8,
+        "answer_numeric": 12.61,
+        "answer_unit": "percent",
+        "answer_temporal_ref": "2021-2023",
+        "per_tile_confidence": {
+          "img_2021_tile_0": 0.78,
+          "img_2023_tile_0": 0.8
+        },
+        "execution_trace": [
+          {
+            "agent": "input_validator",
+            "status": "ok",
+            "detail": {
+              "query_len": 27,
+              "num_assets": 2
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "router",
+            "status": "ok",
+            "detail": {
+              "task_type": "change_vqa",
+              "raw": {
+                "task_type": "change_vqa",
+                "reasoning": "Groq qwen groq/compound-mini single-word",
+                "confidence": 0.9,
+                "_provider": "groq",
+                "_model": "groq/compound-mini"
+              }
+            },
+            "latency_ms": 1104
+          },
+          {
+            "agent": "planner",
+            "status": "ok",
+            "detail": {
+              "plan": {
+                "task_type": "change_vqa",
+                "reasoning": "The query requires identifying and describing changes in a specific region (Sector A) between two time points. Both provided assets (img_2021 and img_2023) are necessary to perform temporal comparison and change detection. The matching CRS ensures direct spatial alignment for accurate analysis.",
+                "required_assets": [
+                  "img_2021",
+                  "img_2023"
+                ],
+                "fusion_needed": false,
+                "temporal_needed": true,
+                "confidence": 0.95,
+                "_provider": "groq",
+                "_model": "qwen/qwen3.6-27b",
+                "requires_coreg": true,
+                "tile_config": {
+                  "enabled": true,
+                  "size": 256,
+                  "overlap_px": 32
+                },
+                "data_requirements": {
+                  "temporal": "multi",
+                  "bands": [
+                    "B2",
+                    "B3",
+                    "B4"
+                  ],
+                  "sar_pol": null
+                },
+                "steps": [
+                  "preprocessing",
+                  "vision_encoder",
+                  "fusion",
+                  "task_agent"
+                ],
+                "fusion_method": "late",
+                "sub_queries": null,
+                "spatial_aggregation": null,
+                "region_of_interest": {
+                  "region": "Sector",
+                  "bbox": [
+                    79.0,
+                    12.0,
+                    79.5,
+                    12.5
+                  ],
+                  "crs": "EPSG:4326"
+                }
+              },
+              "requires_coreg": true,
+              "sub_queries": null,
+              "region": {
+                "region": "Sector",
+                "bbox": [
+                  79.0,
+                  12.0,
+                  79.5,
+                  12.5
+                ],
+                "crs": "EPSG:4326"
+              }
+            },
+            "latency_ms": 6093
+          },
+          {
+            "agent": "preprocessing",
+            "status": "ok",
+            "detail": {
+              "num_tiles": 4,
+              "coreg": {
+                "ssim": 0.922,
+                "residual": 0.239,
+                "method": "dummy_affine",
+                "passed": true,
+                "num_tiles": 4
+              },
+              "gsd_normalized": 10.0,
+              "spectral": {
+                "ndvi_mean": 0.42,
+                "ndwi_mean": -0.12,
+                "ndbi_mean": 0.18,
+                "evi_mean": 0.35
+              },
+              "roi": {
+                "region": "Sector",
+                "bbox": [
+                  79.0,
+                  12.0,
+                  79.5,
+                  12.5
+                ],
+                "crs": "EPSG:4326"
+              }
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_selector",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "modalities": [
+                "unknown",
+                "unknown"
+              ],
+              "task": "change_vqa"
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "encoder_compat",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "requires_coreg": true,
+              "band_reports": [
+                {
+                  "asset_id": "img_2021",
+                  "bands": null,
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": false,
+                  "note": "no band metadata, assume available (dummy)"
+                },
+                {
+                  "asset_id": "img_2023",
+                  "bands": null,
+                  "available": true,
+                  "missing": [],
+                  "substitute_possible": false,
+                  "note": "no band metadata, assume available (dummy)"
+                }
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "coreg_gate",
+            "status": "ok",
+            "detail": {
+              "ssim": 0.922,
+              "residual": 0.239
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "vision_encoder",
+            "status": "ok",
+            "detail": {
+              "encoder": "prithvi",
+              "num_tiles": 4,
+              "embed_keys": [
+                "prithvi"
+              ]
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "fusion",
+            "status": "ok",
+            "detail": {
+              "method": "attention",
+              "confidence": 0.89,
+              "dim": 768
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "task_agent",
+            "status": "ok",
+            "detail": {
+              "task": "change_vqa",
+              "confidence": 0.8,
+              "sub_queries": 0,
+              "has_numeric": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "tile_manager",
+            "status": "ok",
+            "detail": {
+              "counts": {
+                "pending": 0,
+                "done": 4,
+                "failed": 0
+              },
+              "num_tiles": 4
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "post_processing",
+            "status": "ok",
+            "detail": {
+              "confidence": 0.8,
+              "has_chart": true,
+              "stitched": true
+            },
+            "latency_ms": 0
+          },
+          {
+            "agent": "response_composer",
+            "status": "ok",
+            "detail": {
+              "composed_len": 1862,
+              "followups": 3,
+              "version": 1
+            },
+            "latency_ms": 11879
+          }
+        ],
+        "crs": "EPSG:4326",
+        "acquisition_dates": [],
+        "coreg_passed": true,
+        "encoder_used": "prithvi",
+        "fusion_method": "late",
+        "chart_spec": {
+          "type": "bar",
+          "title": "Change by category (ha)",
+          "data": [
+            {
+              "name": "built-up increase",
+              "value": 18.86
+            }
+          ],
+          "unit": "ha",
+          "note": "Change-VQA \u2022 per-category magnitude"
+        },
+        "output_format": "json",
+        "composed_by": "qwen3.5-9b",
+        "chart_prompt_fragment": "CHART RULES \u2014 if your answer contains numbers, emit ONE ```chart block after the narrative, before the table:\n- Type: bar (default) / donut for 2-4 proportional slices / area|line for temporal / radia...",
+        "followup_suggestions": [
+          "Show built-up_increase magnitude as chart?",
+          "By how many ha did built-up increase per sector?",
+          "Show change mask as GeoJSON?"
+        ],
+        "confidence_explanation": "Moderate confidence \u2014 some ambiguity in tile evidence; coreg passed (SSIM\u22650.75); encoder prithvi.",
+        "composer_version": 1,
+        "_session_id": "complete_demo_07_region_geocoded"
+      },
+      "execution_trace": [
+        {
+          "agent": "input_validator",
+          "status": "ok",
+          "detail": {
+            "query_len": 27,
+            "num_assets": 2
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "router",
+          "status": "ok",
+          "detail": {
+            "task_type": "change_vqa",
+            "raw": {
+              "task_type": "change_vqa",
+              "reasoning": "Groq qwen groq/compound-mini single-word",
+              "confidence": 0.9,
+              "_provider": "groq",
+              "_model": "groq/compound-mini"
+            }
+          },
+          "latency_ms": 1104
+        },
+        {
+          "agent": "planner",
+          "status": "ok",
+          "detail": {
+            "plan": {
+              "task_type": "change_vqa",
+              "reasoning": "The query requires identifying and describing changes in a specific region (Sector A) between two time points. Both provided assets (img_2021 and img_2023) are necessary to perform temporal comparison and change detection. The matching CRS ensures direct spatial alignment for accurate analysis.",
+              "required_assets": [
+                "img_2021",
+                "img_2023"
+              ],
+              "fusion_needed": false,
+              "temporal_needed": true,
+              "confidence": 0.95,
+              "_provider": "groq",
+              "_model": "qwen/qwen3.6-27b",
+              "requires_coreg": true,
+              "tile_config": {
+                "enabled": true,
+                "size": 256,
+                "overlap_px": 32
+              },
+              "data_requirements": {
+                "temporal": "multi",
+                "bands": [
+                  "B2",
+                  "B3",
+                  "B4"
+                ],
+                "sar_pol": null
+              },
+              "steps": [
+                "preprocessing",
+                "vision_encoder",
+                "fusion",
+                "task_agent"
+              ],
+              "fusion_method": "late",
+              "sub_queries": null,
+              "spatial_aggregation": null,
+              "region_of_interest": {
+                "region": "Sector",
+                "bbox": [
+                  79.0,
+                  12.0,
+                  79.5,
+                  12.5
+                ],
+                "crs": "EPSG:4326"
+              }
+            },
+            "requires_coreg": true,
+            "sub_queries": null,
+            "region": {
+              "region": "Sector",
+              "bbox": [
+                79.0,
+                12.0,
+                79.5,
+                12.5
+              ],
+              "crs": "EPSG:4326"
+            }
+          },
+          "latency_ms": 6093
+        },
+        {
+          "agent": "preprocessing",
+          "status": "ok",
+          "detail": {
+            "num_tiles": 4,
+            "coreg": {
+              "ssim": 0.922,
+              "residual": 0.239,
+              "method": "dummy_affine",
+              "passed": true,
+              "num_tiles": 4
+            },
+            "gsd_normalized": 10.0,
+            "spectral": {
+              "ndvi_mean": 0.42,
+              "ndwi_mean": -0.12,
+              "ndbi_mean": 0.18,
+              "evi_mean": 0.35
+            },
+            "roi": {
+              "region": "Sector",
+              "bbox": [
+                79.0,
+                12.0,
+                79.5,
+                12.5
+              ],
+              "crs": "EPSG:4326"
+            }
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_selector",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "modalities": [
+              "unknown",
+              "unknown"
+            ],
+            "task": "change_vqa"
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "encoder_compat",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "requires_coreg": true,
+            "band_reports": [
+              {
+                "asset_id": "img_2021",
+                "bands": null,
+                "available": true,
+                "missing": [],
+                "substitute_possible": false,
+                "note": "no band metadata, assume available (dummy)"
+              },
+              {
+                "asset_id": "img_2023",
+                "bands": null,
+                "available": true,
+                "missing": [],
+                "substitute_possible": false,
+                "note": "no band metadata, assume available (dummy)"
+              }
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "coreg_gate",
+          "status": "ok",
+          "detail": {
+            "ssim": 0.922,
+            "residual": 0.239
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "vision_encoder",
+          "status": "ok",
+          "detail": {
+            "encoder": "prithvi",
+            "num_tiles": 4,
+            "embed_keys": [
+              "prithvi"
+            ]
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "fusion",
+          "status": "ok",
+          "detail": {
+            "method": "attention",
+            "confidence": 0.89,
+            "dim": 768
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "task_agent",
+          "status": "ok",
+          "detail": {
+            "task": "change_vqa",
+            "confidence": 0.8,
+            "sub_queries": 0,
+            "has_numeric": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "tile_manager",
+          "status": "ok",
+          "detail": {
+            "counts": {
+              "pending": 0,
+              "done": 4,
+              "failed": 0
+            },
+            "num_tiles": 4
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "post_processing",
+          "status": "ok",
+          "detail": {
+            "confidence": 0.8,
+            "has_chart": true,
+            "stitched": true
+          },
+          "latency_ms": 0
+        },
+        {
+          "agent": "response_composer",
+          "status": "ok",
+          "detail": {
+            "composed_len": 1862,
+            "followups": 3,
+            "version": 1
+          },
+          "latency_ms": 11879
+        }
+      ],
+      "error_log": [],
+      "elapsed_s": 19.123
+    }
+  ]
+}

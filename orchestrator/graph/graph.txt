@@ -1,0 +1,21 @@
+
+START
+  → Input Validator (CRS hard gate)
+    → (fail) → Error Handler → END
+    → (pass) → Router (Mocked Qwen 3.5 9B) → Planner (Mocked Qwen 3.5 9B)
+      → FAN-OUT (architectural intent):
+        ├─ Preprocessing (tiling + dummy co-reg) ─┐
+        └─ Encoder Selector (rule) → Encoder Compat ─┘
+      → barrier_before_coreg (join) → Co-reg Gate (SSIM ≥0.75, bypass if requires_coreg=false)
+        → (skip single-image VQA/grounding) → Vision Encoder
+        → (pass) → Vision Encoder (dummy SatMAE/SSL4EO/Prithvi/CROMA)
+        → (fail & retry<2) ↺ Preprocessing (direct, bypass barrier on retry)
+        → (fail max) → Error Handler → END
+        → Vision Encoder → Multimodal Fusion → Task-Specific Agent
+          → Tile Manager (state service: preprocessing tile creation + task_agent per-tile done) → Post-Processing (conf gate + chart + stitch)
+            → (retry conf<0.6, <3) ↺ Task Agent
+            → (ok) → Response Composer (Mocked Qwen 3.5 9B) → END
+            → (fail) → Error Handler → END
+ACTUAL CODE EXECUTION (sequential for Pregel reliability):
+  planner → preprocessing → encoder_selector → encoder_compat → coreg_gate (internal bypass) → vision_encoder ...
+  See MERMAID_ACTUAL_CODE for LangGraph-generated PNG.

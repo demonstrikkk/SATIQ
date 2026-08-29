@@ -1,0 +1,575 @@
+"""FastAPI orchestrator service — POST /api/v1/task, GET status, WS streaming."""
+from __future__ import annotations
+import asyncio
+import uuid
+import json
+import time
+from typing import Dict, Any, List, Optional
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Depends, Request, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from orchestrator.models.raster_asset import InputSchema
+from orchestrator.models.graph_state import new_state
+from orchestrator.graph.pipeline import get_pipeline
+from orchestrator.core.redis_state import session_state
+from orchestrator.services.minio_client import minio_client
+from orchestrator.services.transcription import transcribe_audio
+from orchestrator.services.geojson_export import export_geojson
+from orchestrator.services.report_generator import generate_report, save_report
+from orchestrator.services.image_ingest import ingest_file, validate_geotiff_integrity
+from orchestrator.helpers.trace import trace_summary
+from orchestrator.core.llm_client import resolve_provider, has_local_qwen_capability, call_qwen_composer
+from orchestrator.core.config import get_settings
+from orchestrator.db.session import init_db
+from orchestrator.helpers.chart_spec import validate_chart_spec
+from orchestrator.services.conversation import save_history
+
+app = FastAPI(title="Satiq Orchestrator", version="1.0.0")
+
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# in-memory store (fallback when DB not available)
+EXECUTIONS: Dict[str, Dict[str,Any]] = {}
+# pubsub for WS
+WS_SUBSCRIBERS: Dict[str, List[WebSocket]] = {}
+
+class TaskRequest(BaseModel):
+    query: str
+    image_ids: Optional[List[str]] = None
+    image_t1_id: Optional[str] = None
+    image_t2_id: Optional[str] = None
+    optical_image_id: Optional[str] = None
+    sar_image_id: Optional[str] = None
+    assets: Optional[List[Dict[str,Any]]] = None
+    session_id: Optional[str] = None
+    # allow gateway style
+    asset_ids: Optional[List[str]] = None
+    spatial_refs: Optional[List[str]] = None
+
+def _normalize_assets(req: TaskRequest) -> tuple[List[Dict[str,Any]], List[str]]:
+    assets = req.assets or []
+    image_ids: List[str] = []
+    if req.image_ids:
+        image_ids.extend(req.image_ids)
+    if req.asset_ids:
+        image_ids.extend(req.asset_ids)
+    if req.image_t1_id:
+        image_ids.append(req.image_t1_id)
+    if req.image_t2_id:
+        image_ids.append(req.image_t2_id)
+    if req.optical_image_id:
+        image_ids.append(req.optical_image_id)
+    if req.sar_image_id:
+        image_ids.append(req.sar_image_id)
+    # if assets empty but ids provided, synthesize
+    if not assets and image_ids:
+        # infer modality: if sar id contains s1 => sar
+        for iid in image_ids:
+            mod = "sar" if "s1" in iid.lower() or "sar" in iid.lower() else "optical"
+            assets.append({"asset_id": iid, "modality": mod, "crs": "EPSG:32617", "gsd": 10.0})
+    # also handle case where assets provided as ids with metadata
+    # ensure each asset has asset_id
+    for a in assets:
+        if "asset_id" not in a and "id" in a:
+            a["asset_id"] = a["id"]
+    # dedupe ids
+    image_ids = list(dict.fromkeys(image_ids))
+    if not image_ids and assets:
+        image_ids = [a.get("asset_id") for a in assets if a.get("asset_id")]  # type: ignore
+    return assets, image_ids
+
+async def _broadcast(session_id: str, event: str, payload: Dict[str,Any] | None = None):
+    msg = {"event": event, "payload": payload or {}, "timestamp": int(time.time()*1000)}
+    # update in-memory
+    if session_id in EXECUTIONS:
+        EXECUTIONS[session_id].setdefault("events", []).append(msg)
+        EXECUTIONS[session_id]["status"] = _status_from_event(event, EXECUTIONS[session_id].get("status","running"))
+        if event in ("final_answer","query_completed","error","cancelled"):
+            EXECUTIONS[session_id]["finished_at"] = time.time()
+    # publish to redis (for other services)
+    try:
+        await session_state.publish(f"session:{session_id}:events", msg)
+    except Exception:
+        pass
+    # WS push
+    for ws in list(WS_SUBSCRIBERS.get(session_id, [])):
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            pass
+
+def _status_from_event(event: str, cur: str) -> str:
+    if event in ("error",):
+        return "failed"
+    if event in ("cancelled",):
+        return "cancelled"
+    if event in ("final_answer","query_completed"):
+        return "completed"
+    return cur or "running"
+
+async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]], image_ids: List[str]):
+    try:
+        # resolve active LLM provider for audit trace
+        try:
+            _prov = resolve_provider()
+            _s = get_settings()
+            _model = _s.qwen_model if _prov == "local" else (_s.groq_model if _prov == "groq" else "mock_qwen_3.5_9b")
+        except Exception:
+            _prov, _model = "mock", "mock"
+        await _broadcast(session_id, "query_started", {"query": query, "llm": _model, "provider": _prov})
+        await _broadcast(session_id, "input_started")
+        # small delay to mimic streaming
+        await asyncio.sleep(0.05)
+        await _broadcast(session_id, "input_done", {"status": "completed", "durationMs": 80})
+        await _broadcast(session_id, "planner_started")
+
+        state = new_state(session_id=session_id, query=query, assets=assets, image_ids=image_ids)
+        # set initial status
+        pipeline = get_pipeline()
+        # invoke LangGraph
+        result_state = await pipeline.ainvoke(state)  # type: ignore
+
+        # extract trace to broadcast step-by-step for UI compatibility
+        trace = result_state.get("execution_trace") or []
+        # planner_done
+        plan = result_state.get("plan") or {}
+        task_type = result_state.get("task_type","vqa")
+        await _broadcast(session_id, "planner_done", {"goal": plan.get("reasoning",""), "task_type": task_type, "capabilities": [task_type], "llm":"qwen3.5-9b", "goals":[task_type], "plan": plan})
+        await _broadcast(session_id, "execution_started", {"gis": {"operation": "tiling+coreg", "coreg": result_state.get("coreg",{})}})
+
+        # model events — infer from encoder/task
+        encoder = result_state.get("encoder","satmae")
+        task_output = result_state.get("task_output") or {}
+        final = result_state.get("final_result") or task_output
+
+        # emit model_started/done
+        model_name_map = {
+            "vqa": "RS-VQA",
+            "grounding": "GroundingDINO",
+            "change_vqa": "ChangeChat",
+            "optical_sar_fusion": "CROMA Fusion",
+            "captioning": "RS-VQA",
+        }
+        model_name = model_name_map.get(task_type, encoder)
+        await _broadcast(session_id, "model_started", {"model": model_name})
+        await asyncio.sleep(0.15)
+        await _broadcast(session_id, "model_progress", {"progress": 0.6})
+        await asyncio.sleep(0.1)
+        # pass through task_output details
+        await _broadcast(session_id, "model_done", {"model": model_name, **{k:v for k,v in task_output.items() if k not in ("fused_repr","embeddings")}, "status": "OK" if not result_state.get("error") else "FAILED"})
+
+        await _broadcast(session_id, "evidence_started")
+        await asyncio.sleep(0.05)
+        conf = final.get("confidence") or result_state.get("confidence") or 0.82
+        await _broadcast(session_id, "evidence_done", {"confidence": conf, "evidence_count": 1})
+
+        await _broadcast(session_id, "composer_started", {"llm":"qwen3.5-9b"})
+        # thinking delta — use trace
+        thinking = "; ".join([f"{s.get('agent')}:{s.get('status')}" for s in trace[-4:]])
+        await _broadcast(session_id, "thinking_delta", {"chunk": thinking or "Qwen 3.5 9B: fused evidence, composing answer"})
+        await _broadcast(session_id, "thinking_done")
+
+        # answer deltas — split final answer
+        answer_text = final.get("answer_text","")
+        # if chart, emit as delta too
+        chart = final.get("chart_spec")
+        if chart:
+            # validate before emitting
+            valid, _ = validate_chart_spec(chart)
+            if valid:
+                answer_text += f"\n\n```chart\n{json.dumps(chart)}\n```"
+
+        # chunk answer for streaming
+        chunk_size = 400
+        for i in range(0, len(answer_text), chunk_size):
+            await _broadcast(session_id, "answer_delta", {"chunk": answer_text[i:i+chunk_size]})
+            await asyncio.sleep(0.12)
+
+        # also emit table-like evidence if present
+        if final.get("bbox_xyxy") or final.get("bbox") or final.get("bbox_normalized"):
+            bbox = final.get("bbox_xyxy") or final.get("bbox") or final.get("bbox_normalized")
+            await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n| BBox | {bbox} |\n| Confidence | {conf} |"})
+
+        if final.get("per_modality_confidence"):
+            per = final["per_modality_confidence"]
+            await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n| Modality | Confidence |\n|---|---:|\n| Optical | {per.get('optical',0):.2f} |\n| SAR | {per.get('sar',0):.2f} |\n| Fused | {per.get('fused',0):.2f} |"})
+
+        await _broadcast(session_id, "final_answer", {"result": final})
+        await _broadcast(session_id, "query_completed", {})
+
+        # persist to minio + in-memory task_outputs
+        try:
+            minio_client.upload_bytes("rs-outputs", f"{session_id}.json", json.dumps(final, indent=2).encode(), content_type="application/json")
+        except Exception:
+            pass
+        EXECUTIONS[session_id]["result"] = final
+        # save to conversation history for followup handling
+        try:
+            save_history(session_id, {"session_id": session_id, "query": query, "task_type": task_type, "task_output": final, "task_output_id": session_id, "confidence": final.get("confidence"), "timestamp": time.time()})
+        except Exception:
+            pass
+
+    except Exception as e:
+        await _broadcast(session_id, "error", {"message": str(e)})
+        EXECUTIONS[session_id]["error"] = str(e)
+
+@app.on_event("startup")
+async def startup():
+    try:
+        await init_db()
+    except Exception as e:
+        print(f"[db] init skipped: {e}")
+    try:
+        minio_client.ensure_buckets()
+    except Exception:
+        pass
+
+@app.get("/health")
+async def health():
+    return {"status":"healthy","timestamp": time.time(), "uptime": time.time()}
+
+@app.get("/api/v1/llm/status")
+async def llm_status():
+    s = get_settings()
+    prov = resolve_provider()
+    return {
+        "provider": prov,
+        "llm_provider_setting": s.llm_provider,
+        "mock_qwen": s.mock_qwen,
+        "has_local_qwen_capability": has_local_qwen_capability(),
+        "local": {"base_url": s.qwen_base_url, "model": s.qwen_model, "has_ollama": has_local_qwen_capability()},
+        "groq": {"model": s.groq_model, "stt_model": s.groq_stt_model, "has_key": bool(s.groq_api_key), "base_url": s.groq_base_url},
+        "voice_enabled": s.enable_voice,
+    }
+
+@app.post("/api/v1/transcribe")
+async def transcribe(
+    file: UploadFile = File(..., description="Audio file (wav/mp3/m4a/ogg/flac/webm)"),
+    language: Optional[str] = Form(default=None),
+    prompt: Optional[str] = Form(default=None),
+):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="filename required")
+    # size guard: 25MB (Groq limit)
+    data = await file.read()
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="audio exceeds 25MB limit")
+    if len(data) == 0:
+        raise HTTPException(status_code=400, detail="empty audio")
+    result = transcribe_audio(data, filename=file.filename, language=language, prompt=prompt)
+    # if transcription failed but groq error, return 502
+    if result.get("error") and not result.get("_mock"):
+        raise HTTPException(status_code=502, detail=result["error"])
+    return result
+
+@app.post("/api/v1/task/with-audio")
+async def create_task_with_audio(
+    background_tasks: BackgroundTasks,
+    query: Optional[str] = Form(default=None),
+    file: Optional[UploadFile] = File(default=None, description="Optional voice audio to transcribe"),
+    language: Optional[str] = Form(default=None),
+    image_ids: Optional[str] = Form(default=None, description="JSON array string e.g. '[\"img_001\"]'"),
+    assets: Optional[str] = Form(default=None, description="JSON array string for assets"),
+):
+    # voice-to-text: if file provided and query empty, transcribe
+    final_query = (query or "").strip()
+    transp = None
+    if file is not None and file.filename:
+        data = await file.read()
+        if data:
+            transp = transcribe_audio(data, filename=file.filename, language=language)
+            if transp.get("text"):
+                final_query = transp["text"]
+            elif not final_query:
+                raise HTTPException(status_code=422, detail=f"transcription failed: {transp.get('error')}")
+    if not final_query:
+        raise HTTPException(status_code=400, detail="query or audio file required")
+    # parse image_ids / assets if JSON strings
+    import json as _json
+    ids: Optional[List[str]] = None
+    if image_ids:
+        try:
+            ids = _json.loads(image_ids) if image_ids.strip().startswith("[") else [image_ids]
+        except Exception:
+            ids = [image_ids]
+    asset_list: Optional[List[Dict[str,Any]]] = None
+    if assets:
+        try:
+            asset_list = _json.loads(assets)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"invalid assets JSON: {e}")
+    # reuse existing task creation logic
+    req = TaskRequest(query=final_query, image_ids=ids, assets=asset_list)
+    assets_n, ids_n = _normalize_assets(req)
+    if assets_n:
+        crs_vals = [a.get("crs") for a in assets_n if a.get("crs")]
+        if len(set(crs_vals)) > 1:
+            raise HTTPException(status_code=400, detail=f"CRS mismatch: {crs_vals}")
+    session_id = f"sess_{uuid.uuid4().hex[:8]}"
+    EXECUTIONS[session_id] = {
+        "session_id": session_id,
+        "query": final_query,
+        "assets": assets_n,
+        "image_ids": ids_n,
+        "status": "queued",
+        "created_at": time.time(),
+        "events": [],
+        "result": None,
+        "transcription": transp,
+    }
+    background_tasks.add_task(run_pipeline, session_id, final_query.strip(), assets_n, ids_n)
+    return {"session_id": session_id, "status": "queued", "query": final_query, "transcription": transp}
+
+@app.post("/api/v1/task")
+async def create_task(req: TaskRequest, background_tasks: BackgroundTasks):
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=400, detail="query is required")
+    if len(req.query) > 4000:
+        raise HTTPException(status_code=400, detail="query exceeds 4000 chars")
+    assets, image_ids = _normalize_assets(req)
+    # quick CRS gate before enqueue
+    if assets:
+        crs_vals = [a.get("crs") for a in assets if a.get("crs")]
+        if len(set(crs_vals)) > 1:
+            raise HTTPException(status_code=400, detail=f"CRS mismatch: {crs_vals}")
+
+    session_id = req.session_id or f"sess_{uuid.uuid4().hex[:8]}"
+    EXECUTIONS[session_id] = {
+        "session_id": session_id,
+        "query": req.query,
+        "assets": assets,
+        "image_ids": image_ids,
+        "status": "queued",
+        "created_at": time.time(),
+        "events": [],
+        "result": None,
+    }
+    # run in background
+    background_tasks.add_task(run_pipeline, session_id, req.query.strip(), assets, image_ids)
+    # also allow direct await for tests? For now background
+    return {"session_id": session_id, "status": "queued"}
+
+@app.get("/api/v1/task/{session_id}")
+async def get_task(session_id: str):
+    exec_ = EXECUTIONS.get(session_id)
+    if not exec_:
+        raise HTTPException(status_code=404, detail="session not found")
+    # include result if completed
+    return {
+        "session_id": session_id,
+        "status": exec_.get("status"),
+        "query": exec_.get("query"),
+        "result": exec_.get("result"),
+        "events": exec_.get("events", [])[-20:],  # last 20
+        "created_at": exec_.get("created_at"),
+        "trace": (exec_.get("result") or {}).get("execution_trace"),
+    }
+
+@app.get("/api/v1/task/{session_id}/geojson")
+async def get_task_geojson(session_id: str, crs: str = "EPSG:4326"):
+    exec_ = EXECUTIONS.get(session_id)
+    if not exec_:
+        raise HTTPException(status_code=404, detail="session not found")
+    result = exec_.get("result")
+    if not result:
+        raise HTTPException(status_code=404, detail="task not completed yet")
+    try:
+        fc = export_geojson(result, crs=crs)
+        return fc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)[:300])
+
+@app.get("/api/v1/session/{session_id}/trace/summary")
+async def get_trace_summary(session_id: str, threshold_ms: int = 2000):
+    exec_ = EXECUTIONS.get(session_id)
+    if not exec_:
+        raise HTTPException(status_code=404, detail="session not found")
+    result = exec_.get("result") or {}
+    trace = result.get("execution_trace") or exec_.get("events") or []
+    # normalize events to trace format if needed
+    if trace and isinstance(trace[0], dict) and "event" in trace[0]:
+        # events are broadcast events, convert to trace-like
+        trace = [{"agent": e.get("event"), "status": "ok", "latency_ms": 0} for e in trace]
+    summary = trace_summary(trace, threshold_ms=threshold_ms)
+    return summary
+
+class ReportRequest(BaseModel):
+    format: str = "pdf"
+    task_ids: Optional[List[str]] = None
+
+@app.post("/api/v1/session/{session_id}/report")
+async def create_report(session_id: str, req: ReportRequest):
+    # collect task_outputs for session: if task_ids provided, fetch those, else all for session
+    outputs: List[Dict[str, Any]] = []
+    if req.task_ids:
+        for tid in req.task_ids:
+            ex = EXECUTIONS.get(tid)
+            if ex and ex.get("result"):
+                outputs.append(ex["result"])
+    else:
+        # use current session result
+        ex = EXECUTIONS.get(session_id)
+        if ex and ex.get("result"):
+            outputs.append(ex["result"])
+        # also search all EXECUTIONS for same session prefix
+        for k, v in EXECUTIONS.items():
+            if k != session_id and v.get("result") and k.startswith(session_id[:4]):
+                outputs.append(v["result"])
+                if len(outputs) >= 10:
+                    break
+    if not outputs:
+        raise HTTPException(status_code=404, detail="no completed tasks for report")
+    fmt = req.format.lower()
+    if fmt not in ("pdf","docx","html"):
+        raise HTTPException(status_code=400, detail="format must be pdf|docx|html")
+    try:
+        data = generate_report(session_id, outputs, format=fmt)  # type: ignore
+        # also save to storage
+        try:
+            save_report(session_id, outputs, format=fmt)
+        except Exception:
+            pass
+        from fastapi.responses import Response
+        media = {"pdf":"application/pdf","docx":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","html":"text/html"}[fmt]
+        return Response(content=data, media_type=media, headers={"Content-Disposition": f"attachment; filename={session_id}.{fmt}"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)[:300])
+
+class RecomposeRequest(BaseModel):
+    temperature: Optional[float] = None
+    prompt: Optional[str] = None
+
+@app.post("/api/v1/task/{session_id}/recompose")
+async def recompose_task(session_id: str, req: RecomposeRequest):
+    exec_ = EXECUTIONS.get(session_id)
+    if not exec_:
+        raise HTTPException(status_code=404, detail="session not found")
+    result = exec_.get("result")
+    if not result:
+        raise HTTPException(status_code=404, detail="task not completed yet")
+    # re-run composer only with increased temperature
+    try:
+        # fetch trace
+        trace = result.get("execution_trace") or []
+        query = exec_.get("query") or result.get("query") or ""
+        # bump composer_version
+        version = int(result.get("composer_version") or 1) + 1
+        # call composer with slightly higher temperature via llm_client (uses 0.2 default, we pass via prompt hint)
+        new_text = call_qwen_composer(query + (f" [recompose temp {req.temperature}]" if req.temperature else " [re-explain differently]"), result, trace)
+        new_result = dict(result)
+        new_result["answer_text"] = new_text
+        new_result["composer_version"] = version
+        new_result["recomposed"] = True
+        new_result["recompose_prompt"] = req.prompt
+        # update stored
+        EXECUTIONS[session_id]["result"] = new_result
+        try:
+            minio_client.upload_bytes("rs-outputs", f"{session_id}_v{version}.json", json.dumps(new_result, indent=2).encode(), content_type="application/json")
+        except Exception:
+            pass
+        return new_result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)[:300])
+
+@app.websocket("/ws/task/{session_id}")
+async def ws_task(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    WS_SUBSCRIBERS.setdefault(session_id, []).append(websocket)
+    # replay buffered events
+    exec_ = EXECUTIONS.get(session_id)
+    if exec_:
+        for ev in exec_.get("events", []):
+            await websocket.send_json(ev)
+        if exec_.get("status") in ("completed","failed","cancelled"):
+            await websocket.close()
+            WS_SUBSCRIBERS[session_id].remove(websocket)
+            return
+    # subscribe to redis pubsub as well
+    def on_redis(ev):
+        # push via asyncio — need to schedule
+        try:
+            loop = asyncio.get_event_loop()
+            loop.create_task(websocket.send_json(ev))
+        except Exception:
+            pass
+    unsub = session_state.subscribe(f"session:{session_id}:events", on_redis)
+    try:
+        while True:
+            await websocket.receive_text()  # keep alive, ignore
+    except WebSocketDisconnect:
+        pass
+    finally:
+        try:
+            WS_SUBSCRIBERS[session_id].remove(websocket)
+        except Exception:
+            pass
+        unsub()
+
+@app.post("/api/v1/ingest")
+async def ingest_image(
+    file: UploadFile = File(..., description="Image/video file"),
+    crs: str = Form(default="EPSG:4326"),
+):
+    data = await file.read()
+    if len(data) == 0:
+        raise HTTPException(status_code=400, detail="empty file")
+    if len(data) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="file exceeds 100MB")
+    try:
+        res = ingest_file(data, file.filename or "upload.bin", target_crs=crs)
+        # convert thumbnail to base64 for JSON if needed, else return path
+        thumb_b64 = None
+        if res.get("thumbnail"):
+            import base64
+            thumb_b64 = base64.b64encode(res["thumbnail"]).decode()[:200] + "..." if len(res["thumbnail"]) > 200 else base64.b64encode(res["thumbnail"]).decode()
+        return {
+            "filename": res.get("filename"),
+            "is_video": res.get("is_video"),
+            "geotiff_path": res.get("geotiff_path"),
+            "validation": res.get("validation"),
+            "exif": res.get("exif"),
+            "keyframes_count": res.get("keyframes_count"),
+            "thumbnail_preview": thumb_b64,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)[:300])
+
+@app.post("/api/v1/benchmark")
+async def run_benchmark_endpoint(
+    dataset: str = Form(default="vrsbench"),
+    split: str = Form(default="val"),
+    limit: int = Form(default=5),
+    background_tasks: BackgroundTasks = None,  # type: ignore
+):
+    if dataset not in ("vrsbench","rsvqa","cdvqa"):
+        raise HTTPException(status_code=400, detail="dataset must be vrsbench|rsvqa|cdvqa")
+    # run as background? For now run inline (small limit)
+    try:
+        from eval.benchmark import run_benchmark
+        result = await run_benchmark(dataset, split, limit=limit)  # type: ignore
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)[:300])
+
+@app.get("/api/v1/benchmark/stream")
+async def benchmark_stream(dataset: str = "vrsbench", split: str = "val", limit: int = 5):
+    from fastapi.responses import StreamingResponse
+    from eval.benchmark import run_benchmark_stream
+    async def gen():
+        async for ev in run_benchmark_stream(dataset, split, limit):  # type: ignore
+            yield f"data: {json.dumps(ev)}\n\n"
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+# also expose gateway-compatible endpoints: POST /api/query and GET /api/query/:id/stream
+# so gateway can proxy directly if needed, but primary is /api/v1/task
+
+@app.post("/api/query")
+async def create_query_compat(req: TaskRequest, background_tasks: BackgroundTasks):
+    # map gateway AnalysisRequest -> TaskRequest
+    return await create_task(req, background_tasks)
+
+@app.get("/api/query/{execution_id}")
+async def get_query_compat(execution_id: str):
+    return await get_task(execution_id)

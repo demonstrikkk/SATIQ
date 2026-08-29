@@ -63,6 +63,7 @@ How will we prove it works? (tests, benchmark, compose check — paste command/o
 | [0001](0001-agent-governance.md) | Agent governance docs | Accepted | 2026-08-26 |
 | [0002](0002-api-gateway.md) | Implement API gateway and rate limiter | Accepted | 2026-08-28 |
 | [0003](0003-frontend-workstation.md) | Frontend Analysis Workstation (Phase 0–12) | Accepted | 2026-08-28 |
+| [0004](0004-orchestrator-pipeline.md) | Orchestrator LangGraph Pipeline with Dummy Vision & Mocked Qwen 3.5 9B | Accepted | 2026-08-29 |
 
 ## Existing ADRs
 
@@ -70,5 +71,6 @@ How will we prove it works? (tests, benchmark, compose check — paste command/o
 * `0001-agent-governance.md` — agent workflow + traceability
 * `0002-api-gateway.md` — API gateway and rate limiter implementation
 * `0003-frontend-workstation.md` — frontend workstation (Phase 0–12)
+* `0004-orchestrator-pipeline.md` — orchestrator LangGraph pipeline with dummy vision & mocked Qwen
 
 Create new ADRs by copying the template above. Link them from `docs/DECISIONS.md` Index and from this table.

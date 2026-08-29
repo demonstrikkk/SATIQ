@@ -1,0 +1,33 @@
+
+%% INTENDED ARCHITECTURE (not executed graph)
+%% Executed graph is sequential — see pipeline.py comments
+%% View at https://mermaid.live
+```mermaid
+flowchart TD
+    START([START]) --> IV[input_validator\nDeterministic gate\nCRS hard check]
+    IV -->|pass| R[router\nMocked Qwen 3.5 9B]
+    IV -->|fail| ERR[error_handler]
+    R --> P[planner\nMocked Qwen 3.5 9B • StepPlan]
+    P --> PRE[preprocessing\ntiling + dummy co-reg • writes tile_manager]
+    P --> ES[encoder_selector\nrule-based]
+    ES --> EC[encoder_compat\n gate]
+    EC -->|fail| ERR
+    EC -->|pass| BAR{{barrier_before_coreg<br/>join: preprocessing + encoder_compat}}
+    PRE --> BAR
+    BAR --> CG[coreg_gate\nSSIM ≥0.75<br/>bypass if requires_coreg=false]
+    CG -->|skip single-image| VE[vision_encoder\nSatMAE/SSL4EO/Prithvi/CROMA dummy]
+    CG -->|pass| VE
+    CG -->|fail retry<2| PRE
+    CG -->|fail max retries| ERR
+    VE --> F[fusion\n dummy attention]
+    F --> TA[task_agent\n VQA/Grounding/Change/Fusion]
+    TA -- per-tile done --> TM[tile_manager<br/>state service: stitch_ready?]
+    PRE -. tile creation .-> TM
+    TM --> PP[post_processing\n confidence gate + chart + stitch]
+    PP -->|retry conf<0.6| TA
+    PP -->|ok| RC[response_composer\nMocked Qwen 3.5 9B]
+    PP -->|fail| ERR
+    RC --> END([END])
+    ERR --> END
+    TA -->|error| ERR
+```
