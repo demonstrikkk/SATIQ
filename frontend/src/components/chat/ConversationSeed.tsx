@@ -46,8 +46,13 @@ function EarthHalf() {
         }}
       />
 
-      {/* Earth sphere — smooth circular orbit (revolving, not spinning) — 10°/3s = 108s/orbit */}
-      <div className="absolute left-1/2 bottom-20 w-[110vw] max-w-[1260px] aspect-square" style={{ animation: "earthOrbit 108s linear infinite", willChange: "transform", transform: "translate(-50%, 72%)" }}>
+      {/* Earth sphere — smooth circular orbit (revolving, not spinning) — 10°/3s = 108s/orbit — uses motion for reliability over global.css */}
+      <motion.div
+        className="absolute left-1/2 bottom-20 w-[110vw] max-w-[1260px] aspect-square"
+        style={{ x: "-50%", y: "72%", willChange: "transform" }}
+        animate={{ x: ["-50%", "-46%", "-50%", "-54%", "-50%"], y: ["72%", "68%", "64%", "68%", "72%"] }}
+        transition={{ duration: 108, repeat: Infinity, ease: "linear" }}
+      >
         <div className="relative w-full h-full rounded-full overflow-hidden" style={{ clipPath: "circle(50%)" }}>
           {/* Earth texture — static, the whole sphere orbits smoothly */}
           <div className="absolute inset-0">
@@ -85,7 +90,7 @@ function EarthHalf() {
             }}
           />
         </div>
-      </div>
+      </motion.div>
 
       {/* Foreground haze — blend Earth into UI */}
       <div
@@ -507,7 +512,7 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
                 opacity: 0.9,
               }}
             />
-            {/* Sweeping lamp beam — smooth down and back, repeats */}
+            {/* Sweeping lamp beam — smooth down and back, repeats (motion-driven for reliability) */}
             <div
               aria-hidden
               className="pointer-events-none absolute left-1/2 top-[28px] -translate-x-1/2 -z-10 overflow-hidden"
@@ -517,16 +522,17 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
                 clipPath: "polygon(49.35% 0%, 50.65% 0%, 84% 100%, 16% 100%)",
               }}
             >
-              <div
+              <motion.div
                 className="absolute inset-x-0"
                 style={{
                   top: "-20%",
                   height: "55%",
-                  background: "linear-gradient(180deg, transparent 0%, rgba(6,182,212,0.32) 18%, rgba(6,182,212,0.20) 38%, rgba(255,255,255,0.10) 52%, transparent 78%)",
+                  background: "linear-gradient(180deg, transparent 0%, rgba(6,182,212,0.38) 18%, rgba(6,182,212,0.26) 38%, rgba(255,255,255,0.14) 52%, transparent 78%)",
                   filter: "blur(0.5px)",
-                  animation: "beamSweep 3.2s ease-in-out infinite alternate",
                   willChange: "transform",
                 }}
+                animate={{ y: ["-28%", "28%"] }}
+                transition={{ duration: 3.2, repeat: Infinity, repeatType: "reverse", ease: "easeInOut" }}
               />
             </div>
             {/* Lamp halo behind satellite */}
