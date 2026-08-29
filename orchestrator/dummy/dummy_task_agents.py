@@ -86,22 +86,43 @@ def dummy_grounding(fused_repr, query: str, image_id: str = "img_001") -> Dict[s
     }
 
 def dummy_change_vqa(fused_repr, query: str, image_t1_id: str = "img_2021", image_t2_id: str = "img_2023") -> Dict[str, Any]:
+    import re
     rnd = random.Random(_seed(query + "change"))
+    ql = query.lower()
     cats = ["built-up_increase"]
-    if "water" in query.lower():
+    if "water" in ql:
         cats = ["water_increase", "built-up_increase"]
-    elif "vegetation" in query.lower() or "forest" in query.lower():
+    elif "vegetation" in ql or "forest" in ql:
         cats = ["vegetation_decrease"]
+    elif "parliament" in ql:
+        cats = ["built-up_increase"]
     conf = round(0.75 + rnd.random()*0.12, 2)
-    # numeric: change magnitude pct and area
-    magnitude = round(12.5 + rnd.random()*8, 2)  # percent
+    magnitude = round(12.5 + rnd.random()*8, 2)
     severity = "moderate" if magnitude < 15 else "high"
+    # extract years from query for temporal ref (e.g., 2024 to 2026)
+    years = re.findall(r"20\d{2}", query)
+    if len(years) >= 2:
+        temporal_ref = f"{years[0]}-{years[1]}"
+        year_phrase = f"between {years[0]} and {years[1]}"
+    elif len(years) == 1:
+        temporal_ref = years[0]
+        year_phrase = f"around {years[0]}"
+    else:
+        temporal_ref = "2021-2023"
+        year_phrase = "between 2021 and 2023"
+    # query-aware answer
+    if "parliament" in ql:
+        answer_text = f"Parliament building construction shows clear expansion {year_phrase}. New structural footprint expanded along the central and eastern zones, with +{magnitude:.1f}% built-up increase. Scaffolding and roof structures visible in the later image indicate ongoing construction."
+    elif "water" in ql and "parliament" not in ql:
+        answer_text = f"Water extent changed {year_phrase} with +{magnitude:.1f}% increase along the eastern edge."
+    else:
+        answer_text = f"Built-up area has expanded {year_phrase} along the eastern edge, replacing what was previously bare soil (+{magnitude:.1f}% change)."
     return {
         "task": "change_vqa",
         "query": query,
         "image_t1_id": image_t1_id,
         "image_t2_id": image_t2_id,
-        "answer_text": "Built-up area has expanded along the eastern edge, replacing what was previously bare soil.",
+        "answer_text": answer_text,
         "change_categories": cats,
         "change_magnitude_pct": magnitude,
         "severity": severity,
@@ -109,7 +130,7 @@ def dummy_change_vqa(fused_repr, query: str, image_t1_id: str = "img_2021", imag
         "confidence": conf,
         "answer_numeric": magnitude,
         "answer_unit": "percent",
-        "answer_temporal_ref": "2021-2023",
+        "answer_temporal_ref": temporal_ref,
         "per_tile_confidence": {f"{image_t1_id}_tile_0": round(conf-0.02,3), f"{image_t2_id}_tile_0": conf},
     }
 

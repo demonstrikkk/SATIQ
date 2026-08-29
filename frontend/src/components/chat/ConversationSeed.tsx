@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from "react";
-import { Paperclip, ArrowUp, MapPin, X, Image as ImageIcon, Loader2, AlertCircle, Shield, Search, Eye, FileCheck, Zap, Clock3 } from "lucide-react";
+import { Paperclip, ArrowUp, MapPin, X, Image as ImageIcon, Loader2, AlertCircle, Clock3 } from "lucide-react";
 import { useChatStore, type ChatContext } from "@/store/chat.store";
 import { useWorkspaceStore } from "@/store/workspace.store";
 import { useExecutionStore } from "@/store/execution.store";
@@ -9,168 +9,170 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 
-
+// ─── Earth visual — atmospheric landing background ─────────────────────────────
 function EarthHalf() {
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none select-none" aria-hidden>
-      {/* Deep space background */}
-      <div className="absolute inset-0" style={{
-        background: `radial-gradient(ellipse 120% 70% at 50% 100%, rgba(8,16,36,0.95) 0%, rgba(2,4,12,0.85) 40%, transparent 70%)`
-      }} />
+      {/* Deep space base */}
+      <div
+        className="absolute inset-0"
+        style={{ background: "radial-gradient(ellipse 140% 80% at 50% 100%, rgba(5,8,15,0.96) 0%, rgba(2,4,12,0.88) 35%, transparent 65%)" }}
+      />
 
-      {/* Horizon glow – background glow (optional, can be removed) */}
+      {/* Horizon atmospheric glow */}
       <div
         className="absolute left-1/2 bottom-0 -translate-x-1/2"
         style={{
-          width: "120vw",
+          width: "110vw",
           maxWidth: 1280,
-          height: "30vh",
-          bottom: "-6vh",
-          background: `radial-gradient(ellipse 50% 40% at 50% 60%, rgba(0,180,255,0.08) 0%, rgba(0,120,255,0.04) 30%, transparent 70%)`,
-          filter: "blur(20px)",
+          height: "28vh",
+          bottom: "-4vh",
+          background: "radial-gradient(ellipse 50% 40% at 50% 65%, rgba(6,182,212,0.07) 0%, rgba(0,100,200,0.03) 40%, transparent 72%)",
+          filter: "blur(24px)",
         }}
       />
 
-      {/* Thin horizon line */}
+      {/* Thin atmospheric horizon line */}
       <div
         className="absolute left-1/2 bottom-0 -translate-x-1/2"
         style={{
-          width: "90vw",
-          maxWidth: 1000,
-          height: 1.8,
+          width: "85vw",
+          maxWidth: 960,
+          height: 1.5,
           bottom: "-0.5px",
-          background: "linear-gradient(90deg, transparent 0%, rgba(0,200,255,0.3) 15%, rgba(100,200,255,1) 40%, rgba(200,240,255,1) 50%, rgba(100,200,255,1) 60%, rgba(0,200,255,0.3) 85%, transparent 100%)",
-          boxShadow: "0 0 20px rgba(0,180,255,0.6), 0 0 40px rgba(0,120,255,0.3)",
+          background:
+            "linear-gradient(90deg, transparent 0%, rgba(6,182,212,0.25) 12%, rgba(100,200,255,0.9) 38%, rgba(220,245,255,1) 50%, rgba(100,200,255,0.9) 62%, rgba(6,182,212,0.25) 88%, transparent 100%)",
+          boxShadow: "0 0 24px rgba(6,182,212,0.5), 0 0 48px rgba(0,120,255,0.2)",
         }}
       />
 
-      {/* Earth container with clip-path */}
-      <div className="absolute left-1/2 bottom-0 -translate-x-1/2 translate-y-[72%] w-[115vw] max-w-[1320px] aspect-square">
-        <div className="relative w-full h-full rounded-full overflow-hidden" style={{ clipPath: 'circle(50%)' }}>
-          {/* Earth image */}
-          <img
-            src="https://images.unsplash.com/photo-1614730321146-b6fa6a46bcb4?w=1600&h=1600&fit=crop&crop=center"
-            alt="Earth from space"
-            className="w-full h-full object-cover"
-            style={{ filter: "brightness(1.05) saturate(1.1)" }}
+      {/* Earth sphere — smooth circular orbit (revolving, not spinning) — 10°/3s = 108s/orbit — uses motion for reliability over global.css */}
+      <motion.div
+        className="absolute left-1/2 bottom-20 w-[110vw] max-w-[1260px] aspect-square"
+        style={{ x: "-50%", y: "72%", willChange: "transform" }}
+        animate={{ x: ["-50%", "-46%", "-50%", "-54%", "-50%"], y: ["72%", "68%", "64%", "68%", "72%"] }}
+        transition={{ duration: 108, repeat: Infinity, ease: "linear" }}
+      >
+        <div className="relative w-full h-full rounded-full overflow-hidden" style={{ clipPath: "circle(50%)" }}>
+          {/* Earth texture — static, the whole sphere orbits smoothly */}
+          <div className="absolute inset-0">
+            <img
+              src="https://images.unsplash.com/photo-1614730321146-b6fa6a46bcb4?w=1600&h=1600&fit=crop&crop=center"
+              alt=""
+              className="w-full h-full object-cover"
+              style={{ filter: "brightness(0.95) saturate(1.05) contrast(1.02)" }}
+            />
+          </div>
+          {/* Atmospheric limb glow */}
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(circle at 50% 50%, transparent 60%, rgba(6,182,212,0.06) 66%, rgba(6,182,212,0.18) 72%, rgba(100,200,255,0.28) 76%, rgba(0,80,200,0.08) 82%, rgba(0,0,0,0.5) 100%)",
+              filter: "blur(2px)",
+            }}
           />
-
-          {/* Atmospheric glow – clipped to Earth */}
-          <div className="absolute inset-0" style={{
-            background: `radial-gradient(circle at 50% 50%, transparent 62%, rgba(0,150,255,0.08) 68%, rgba(0,200,255,0.25) 74%, rgba(100,200,255,0.35) 78%, rgba(0,100,255,0.10) 82%, rgba(0,20,40,0.6) 100%)`,
-            filter: "blur(2.5px)",
-            pointerEvents: "none",
-          }} />
-
           {/* Specular highlight */}
           <div className="absolute inset-0 overflow-hidden">
-            <div className="absolute top-[15%] left-[25%] w-[30%] h-[20%] rounded-full" style={{
-              background: `radial-gradient(ellipse at center, rgba(255,255,255,0.08) 0%, transparent 70%)`,
-              transform: 'rotate(-12deg)',
-            }} />
+            <div
+              className="absolute top-[14%] left-[22%] w-[28%] h-[18%] rounded-full"
+              style={{
+                background: "radial-gradient(ellipse at center, rgba(255,255,255,0.06) 0%, transparent 70%)",
+                transform: "rotate(-10deg)",
+              }}
+            />
           </div>
-
-          {/* Subtle overlay to blend with UI */}
-          <div className="absolute inset-0" style={{
-            background: `radial-gradient(circle at 50% 50%, transparent 40%, rgba(2,4,12,0.15) 70%, rgba(2,4,12,0.3) 100%)`,
-          }} />
+          {/* Edge darkening */}
+          <div
+            className="absolute inset-0"
+            style={{
+              background: "radial-gradient(circle at 50% 50%, transparent 38%, rgba(2,4,12,0.12) 68%, rgba(2,4,12,0.28) 100%)",
+            }}
+          />
         </div>
-      </div>
+      </motion.div>
 
-      {/* Foreground haze */}
-      <div className="absolute left-0 right-0 bottom-0 h-[32vh] pointer-events-none" style={{
-        background: `linear-gradient(to top, #02040F 0%, rgba(2,4,15,0.80) 20%, rgba(2,4,15,0.15) 46%, transparent 100%)`,
-        zIndex: 5,
-      }} />
+      {/* Foreground haze — blend Earth into UI */}
+      <div
+        className="absolute left-0 right-0 bottom-0 h-[35vh] pointer-events-none"
+        style={{
+          background: "linear-gradient(to top, #05080F 0%, rgba(5,8,15,0.85) 18%, rgba(5,8,15,0.18) 44%, transparent 100%)",
+          zIndex: 5,
+        }}
+      />
     </div>
   );
 }
-// ============================================================================
-// STARFIELD – dense, with Milky Way and twinkling stars
-// ============================================================================
+
+// ─── Starfield ────────────────────────────────────────────────────────────────
 function Starfield() {
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
-      <div className="absolute inset-0 bg-[#02040F]" />
+      <div className="absolute inset-0" style={{ background: "#02040F" }} />
 
-      {/* Milky Way glow – diagonal band */}
-      <div className="absolute inset-0" style={{
-        background: `
-          radial-gradient(ellipse 800px 600px at 12% 18%, rgba(37,99,235,0.10), transparent 62%),
-          radial-gradient(ellipse 700px 500px at 88% 72%, rgba(14,165,233,0.08), transparent 62%),
-          radial-gradient(ellipse 1100px 700px at 50% 50%, rgba(7,14,34,0.95), transparent 72%)
-        `,
-        opacity: 0.9
-      }} />
-      {/* Milky Way streak */}
-      <div className="absolute inset-0" style={{
-        background: `linear-gradient(135deg, transparent 30%, rgba(120,160,255,0.03) 40%, rgba(200,220,255,0.05) 50%, rgba(120,160,255,0.03) 60%, transparent 70%)`,
-        transform: 'rotate(-15deg) scale(1.5)',
-        opacity: 0.6
-      }} />
+      {/* Nebula clouds */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background: `
+            radial-gradient(ellipse 800px 600px at 10% 20%, rgba(30,80,200,0.08), transparent 65%),
+            radial-gradient(ellipse 700px 500px at 90% 70%, rgba(6,182,212,0.06), transparent 65%),
+            radial-gradient(ellipse 1100px 800px at 50% 50%, rgba(5,8,25,0.96), transparent 75%)
+          `,
+        }}
+      />
 
-      {/* Star layer 1 – dense small stars */}
-      <div className="absolute inset-0 opacity-[0.50]" style={{
-        backgroundImage: `
-          radial-gradient(1.2px 1.2px at 7% 13%, rgba(255,255,255,0.95) 50%, transparent 50%),
-          radial-gradient(1px 1px at 21% 36%, rgba(255,255,255,0.72) 50%, transparent 50%),
-          radial-gradient(1.3px 1.3px at 36% 10%, rgba(255,255,255,0.88) 50%, transparent 50%),
-          radial-gradient(1px 1px at 51% 26%, rgba(186,230,255,0.82) 50%, transparent 50%),
-          radial-gradient(1.1px 1.1px at 67% 16%, rgba(255,255,255,0.78) 50%, transparent 50%),
-          radial-gradient(1.2px 1.2px at 77% 40%, rgba(255,255,255,0.92) 50%, transparent 50%),
-          radial-gradient(1px 1px at 87% 20%, rgba(186,230,255,0.72) 50%, transparent 50%),
-          radial-gradient(1.4px 1.4px at 13% 60%, rgba(255,255,255,0.82) 50%, transparent 50%),
-          radial-gradient(1px 1px at 27% 76%, rgba(255,255,255,0.62) 50%, transparent 50%),
-          radial-gradient(1.2px 1.2px at 43% 80%, rgba(255,255,255,0.88) 50%, transparent 50%),
-          radial-gradient(1px 1px at 61% 66%, rgba(186,230,255,0.78) 50%, transparent 50%),
-          radial-gradient(1.3px 1.3px at 73% 86%, rgba(255,255,255,0.72) 50%, transparent 50%),
-          radial-gradient(1px 1px at 91% 66%, rgba(255,255,255,0.88) 50%, transparent 50%),
-          radial-gradient(1px 1px at 17% 90%, rgba(255,255,255,0.62) 50%, transparent 50%),
-          radial-gradient(1.1px 1.1px at 57% 50%, rgba(255,255,255,0.52) 50%, transparent 50%),
-          radial-gradient(1px 1px at 31% 46%, rgba(186,230,255,0.52) 50%, transparent 50%)
-        `,
-      }} />
+      {/* Dense small stars */}
+      <div
+        className="absolute inset-0 opacity-50"
+        style={{
+          backgroundImage: `
+            radial-gradient(1.1px 1.1px at 7% 13%, rgba(255,255,255,0.95) 50%, transparent 50%),
+            radial-gradient(1px 1px at 21% 36%, rgba(255,255,255,0.72) 50%, transparent 50%),
+            radial-gradient(1.2px 1.2px at 36% 10%, rgba(255,255,255,0.88) 50%, transparent 50%),
+            radial-gradient(1px 1px at 51% 26%, rgba(186,230,255,0.82) 50%, transparent 50%),
+            radial-gradient(1px 1px at 67% 16%, rgba(255,255,255,0.78) 50%, transparent 50%),
+            radial-gradient(1.1px 1.1px at 77% 40%, rgba(255,255,255,0.92) 50%, transparent 50%),
+            radial-gradient(1px 1px at 87% 20%, rgba(186,230,255,0.72) 50%, transparent 50%),
+            radial-gradient(1.3px 1.3px at 13% 60%, rgba(255,255,255,0.82) 50%, transparent 50%),
+            radial-gradient(1px 1px at 27% 76%, rgba(255,255,255,0.62) 50%, transparent 50%),
+            radial-gradient(1.1px 1.1px at 43% 80%, rgba(255,255,255,0.88) 50%, transparent 50%),
+            radial-gradient(1px 1px at 61% 66%, rgba(186,230,255,0.78) 50%, transparent 50%),
+            radial-gradient(1.2px 1.2px at 73% 86%, rgba(255,255,255,0.72) 50%, transparent 50%),
+            radial-gradient(1px 1px at 91% 66%, rgba(255,255,255,0.88) 50%, transparent 50%),
+            radial-gradient(1px 1px at 17% 90%, rgba(255,255,255,0.62) 50%, transparent 50%),
+            radial-gradient(1px 1px at 57% 50%, rgba(255,255,255,0.52) 50%, transparent 50%),
+            radial-gradient(1px 1px at 31% 46%, rgba(186,230,255,0.52) 50%, transparent 50%)
+          `,
+        }}
+      />
 
-      {/* Star layer 2 – bright twinkling stars */}
-      <div className="absolute inset-0 opacity-30 star-twinkle" style={{
-        backgroundImage: `
-          radial-gradient(1.8px 1.8px at 11% 22%, #fff 50%, transparent 50%),
-          radial-gradient(1.5px 1.5px at 47% 16%, #fff 50%, transparent 50%),
-          radial-gradient(2px 2px at 83% 30%, #fff 50%, transparent 50%),
-          radial-gradient(1.5px 1.5px at 65% 56%, #fff 50%, transparent 50%),
-          radial-gradient(1.8px 1.8px at 23% 86%, #fff 50%, transparent 50%),
-          radial-gradient(1.5px 1.5px at 5% 70%, #fff 50%, transparent 50%),
-          radial-gradient(2.2px 2.2px at 92% 12%, #fff 50%, transparent 50%),
-          radial-gradient(1.8px 1.8px at 38% 92%, #fff 50%, transparent 50%),
-          radial-gradient(2px 2px at 54% 8%, #fff 50%, transparent 50%),
-          radial-gradient(1.6px 1.6px at 78% 72%, #fff 50%, transparent 50%)
-        `,
-      }} />
+      {/* Bright twinkling stars */}
+      <div
+        className="absolute inset-0 star-twinkle"
+        style={{
+          backgroundImage: `
+            radial-gradient(1.8px 1.8px at 11% 22%, #fff 50%, transparent 50%),
+            radial-gradient(1.5px 1.5px at 47% 16%, #fff 50%, transparent 50%),
+            radial-gradient(2px 2px at 83% 30%, #fff 50%, transparent 50%),
+            radial-gradient(1.5px 1.5px at 65% 56%, #fff 50%, transparent 50%),
+            radial-gradient(1.8px 1.8px at 23% 86%, #fff 50%, transparent 50%),
+            radial-gradient(1.5px 1.5px at 5% 70%, #fff 50%, transparent 50%),
+            radial-gradient(2.2px 2.2px at 92% 12%, #fff 50%, transparent 50%),
+            radial-gradient(1.8px 1.8px at 38% 92%, #fff 50%, transparent 50%),
+            radial-gradient(2px 2px at 54% 8%, #fff 50%, transparent 50%),
+            radial-gradient(1.6px 1.6px at 78% 72%, #fff 50%, transparent 50%)
+          `,
+        }}
+      />
 
-      {/* Subtle grid overlay – gives a "sensor" feel */}
-      <div className="absolute inset-0 opacity-[0.012]" style={{
-        backgroundImage: `linear-gradient(rgba(148,163,184,0.2) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.2) 1px, transparent 1px)`,
-        backgroundSize: '48px 48px'
-      }} />
-
-      <style>{`
-        .star-twinkle {
-          animation: twinkle 8s ease-in-out infinite alternate;
-        }
-        @keyframes twinkle {
-          0% { opacity: 0.15; }
-          100% { opacity: 0.40; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .star-twinkle { animation: none; opacity: 0.20; }
-        }
-      `}</style>
+      {/* Subtle topo coordinate grid */}
+      <div className="absolute inset-0 satiq-topo-grid opacity-60" />
     </div>
   );
 }
-// ============================================================================
-// Context Chip – unchanged
-// ============================================================================
+
+// ─── Context chip ─────────────────────────────────────────────────────────────
 type Context = ChatContext & {
   file?: File;
   preview?: string;
@@ -178,61 +180,99 @@ type Context = ChatContext & {
 
 const ContextChip = React.memo(({ context, onRemove }: { context: Context; onRemove: (id: string) => void }) => (
   <motion.span
-    initial={{ scale: 0.85, opacity: 0, y: 5 }}
+    initial={{ scale: 0.85, opacity: 0, y: 4 }}
     animate={{ scale: 1, opacity: 1, y: 0 }}
-    exit={{ scale: 0.85, opacity: 0, y: 5 }}
-    transition={{ type: "spring", stiffness: 400, damping: 20 }}
-    className="inline-flex items-center gap-1.5 max-w-[200px] rounded-full border border-slate-700/60 bg-[#0A0F1A] px-2.5 py-1 text-xs text-slate-300 shadow-sm backdrop-blur-sm transition-all hover:border-slate-500 hover:bg-[#111827]"
+    exit={{ scale: 0.85, opacity: 0, y: 4 }}
+    transition={{ type: "spring", stiffness: 400, damping: 22 }}
+    className="inline-flex items-center gap-1.5 max-w-[200px] rounded-full border border-slate-700/50 bg-[#05080F] px-2.5 py-1 text-xs text-slate-300 backdrop-blur-sm transition-all hover:border-slate-600 hover:bg-[#101827]"
   >
     {context.preview ? (
       <img src={context.preview} alt={context.label} className="h-5 w-5 rounded-full object-cover shrink-0 border border-slate-700" />
     ) : context.type === "aoi" ? (
-      <MapPin size={11} className="shrink-0 text-cyan-400" />
+      <MapPin size={11} className="shrink-0 text-[#06B6D4]" />
     ) : (
-      <ImageIcon size={11} className="shrink-0 text-blue-400" />
+      <ImageIcon size={11} className="shrink-0 text-slate-400" />
     )}
     <span className="truncate max-w-[140px] inline-block align-middle">{context.label}</span>
     <button
       onClick={() => onRemove(context.id)}
-      className="ml-0.5 shrink-0 rounded-full p-0.5 hover:bg-slate-700/70 hover:text-white transition-colors"
+      className="ml-0.5 shrink-0 rounded-full p-0.5 hover:bg-slate-700/60 hover:text-white transition-colors"
       aria-label={`Remove ${context.label}`}
     >
-      <X size={11} />
+      <X size={10} />
     </button>
   </motion.span>
 ));
 ContextChip.displayName = "ContextChip";
 
-// ============================================================================
-// Hint Button
-// ============================================================================
+// ─── Example query cards — ambient affordance ──────────────────────────────────
+const EXAMPLE_QUERIES = [
+  {
+    query: "What changed between these dates?",
+    meta: "Change detection · Sentinel-2",
+    color: "#F59E0B",
+  },
+  {
+    query: "Find water bodies in the north",
+    meta: "Geospatial grounding · SAR",
+    color: "#06B6D4",
+  },
+  {
+    query: "Compare optical and SAR imagery",
+    meta: "Fusion analysis · Multi-modal",
+    color: "#8B5CF6",
+  },
+];
+
+const ExampleCard = React.memo(
+  ({ example, onClick }: { example: (typeof EXAMPLE_QUERIES)[0]; onClick: (q: string) => void }) => (
+    <motion.button
+      whileHover={{ y: -2, scale: 1.01 }}
+      whileTap={{ scale: 0.98 }}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onClick(example.query);
+      }}
+      className="text-left rounded-xl border border-slate-800/60 bg-[#0B1120]/70 backdrop-blur-sm px-4 py-3.5 hover:border-slate-700/60 hover:bg-[#101827]/80 transition-all duration-200 focus-visible:ring-1 focus-visible:ring-[#06B6D4] focus-visible:outline-none"
+      style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.3)" }}
+    >
+      <div className="text-[13px] font-medium text-slate-200 leading-snug">{example.query}</div>
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <span
+          className="h-1.5 w-1.5 rounded-full shrink-0"
+          style={{ background: example.color, boxShadow: `0 0 6px ${example.color}` }}
+        />
+        <span className="text-[11px] text-slate-600 font-mono">{example.meta}</span>
+      </div>
+    </motion.button>
+  )
+);
+ExampleCard.displayName = "ExampleCard";
+
+// ─── Hint pills ────────────────────────────────────────────────────────────────
+const CAPABILITY_HINTS = [
+  "Locate agricultural fields",
+  "Show built-up area increase",
+  "Detect new construction",
+  "Analyze flood risk zones",
+];
+
 const HintButton = React.memo(({ hint, onClick }: { hint: string; onClick: (h: string) => void }) => (
   <motion.button
-    whileHover={{ scale: 1.03, y: -1 }}
+    whileHover={{ scale: 1.02, y: -1 }}
     whileTap={{ scale: 0.96 }}
     onMouseDown={(e) => {
       e.preventDefault();
       onClick(hint);
     }}
-    className="shrink-0 rounded-full border border-slate-700/50 bg-[#0D121F]/60 backdrop-blur-sm px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:border-slate-500 hover:bg-slate-800/60 transition-all duration-200 focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none shadow-sm"
+    className="shrink-0 rounded-full border border-slate-700/50 bg-[#0B1120]/60 backdrop-blur-sm px-3 py-1.5 text-[12px] text-slate-400 hover:text-slate-200 hover:border-slate-600/60 hover:bg-[#141F30]/70 transition-all duration-200 focus-visible:ring-1 focus-visible:ring-[#06B6D4] focus-visible:outline-none"
   >
     {hint}
   </motion.button>
 ));
 HintButton.displayName = "HintButton";
 
-// ============================================================================
-// MAIN – ConversationSeed (with fixed layout so input bar is always visible)
-// ============================================================================
-const CAPABILITY_HINTS = [
-  "What is visible in this image?",
-  "Find the water body in the north",
-  "Locate agricultural fields",
-  "What changed between these dates?",
-  "Show where built-up area increased",
-  "Compare the optical and SAR imagery",
-];
-
+// ─── MAIN — ConversationSeed ───────────────────────────────────────────────────
 export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean }) {
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
@@ -244,9 +284,21 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
   const taRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const { activeContexts, addContext, removeContext, addMessage, queuedMessages, enqueue, dequeue, removeQueued, clearContexts } = useChatStore();
+  const {
+    activeContexts,
+    addContext,
+    removeContext,
+    addMessage,
+    queuedMessages,
+    enqueue,
+    removeQueued,
+    clearContexts,
+  } = useChatStore();
   const { globalStatus } = useExecutionStore();
-  const isBusy = useMemo(() => ["queued","planning","executing","aggregating","composing"].includes(globalStatus), [globalStatus]);
+  const isBusy = useMemo(
+    () => ["queued", "planning", "executing", "aggregating", "composing"].includes(globalStatus),
+    [globalStatus]
+  );
   const { activeAnalysisId } = useWorkspaceStore();
   const active = useMemo(() => analyses.find((a) => a.id === activeAnalysisId), [activeAnalysisId]);
 
@@ -271,9 +323,7 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
       const maxSizeMB = 20;
       const allowedTypes = [".tif", ".tiff", ".png", ".jpg", ".jpeg", ".jp2"];
       const allowed = Array.from(files).filter(
-        (f) =>
-          allowedTypes.some((ext) => f.name.toLowerCase().endsWith(ext)) &&
-          f.size <= maxSizeMB * 1024 * 1024
+        (f) => allowedTypes.some((ext) => f.name.toLowerCase().endsWith(ext)) && f.size <= maxSizeMB * 1024 * 1024
       );
       if (allowed.length === 0) {
         setError(`No valid files. Max ${maxSizeMB}MB, types: ${allowedTypes.join(", ")}`);
@@ -286,10 +336,24 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
         return;
       }
       toAdd.forEach((f) => {
-        const id = `file_${Date.now()}_${f.name}`;
-        let preview: string | undefined;
-        if (f.type.startsWith("image/")) preview = URL.createObjectURL(f);
-        addContext({ id, type: "image", label: f.name, file: f, preview } as Context);
+        const id = `file_${Date.now()}_${f.name}_${Math.random().toString(36).slice(2, 5)}`;
+        let blobUrl: string | undefined;
+        try { blobUrl = URL.createObjectURL(f); } catch {}
+        addContext({ id, type: "image", label: f.name, file: f, preview: blobUrl } as Context);
+        try {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = String(reader.result || "");
+            if (dataUrl.startsWith("data:")) {
+              const cur = useChatStore.getState().activeContexts.find((c) => c.id === id);
+              if (cur) {
+                useChatStore.getState().removeContext(id);
+                useChatStore.getState().addContext({ id, type: "image", label: f.name, file: f, preview: dataUrl } as Context);
+              }
+            }
+          };
+          reader.readAsDataURL(f);
+        } catch {}
       });
       if (fileRef.current) fileRef.current.value = "";
       setError(null);
@@ -317,7 +381,12 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
           setError("Queue full (5 max) — wait or delete queued items.");
           return;
         }
-        enqueue({ id: Date.now().toString() + Math.random().toString(36).slice(2,6), content: finalMessage, contexts: snapshot, createdAt: Date.now() });
+        enqueue({
+          id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+          content: finalMessage,
+          contexts: snapshot,
+          createdAt: Date.now(),
+        });
         setText("");
         if (taRef.current) taRef.current.style.height = "auto";
         clearContexts();
@@ -337,10 +406,15 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
   );
 
   useEffect(() => {
-    if ((globalStatus === "idle" || globalStatus === "completed" || globalStatus === "failed") && queuedMessages.length > 0) {
+    if (
+      (globalStatus === "idle" || globalStatus === "completed" || globalStatus === "failed") &&
+      queuedMessages.length > 0
+    ) {
       const all = [...queuedMessages];
       const combinedContent = all.map((q) => q.content).join("\n\n");
-      const combinedContexts = Array.from(new Map(all.flatMap((q) => q.contexts).map((c) => [c.id, c] as const)).values());
+      const combinedContexts = Array.from(
+        new Map(all.flatMap((q) => q.contexts).map((c) => [c.id, c] as const)).values()
+      );
       useChatStore.getState().clearQueue();
       setTimeout(() => {
         addMessage({ id: Date.now().toString(), role: "user", content: combinedContent, contexts: combinedContexts });
@@ -351,6 +425,11 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handleSend();
+        return;
+      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
@@ -359,11 +438,14 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
     [handleSend]
   );
 
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    processFiles(e.dataTransfer.files);
-  }, [processFiles]);
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      processFiles(e.dataTransfer.files);
+    },
+    [processFiles]
+  );
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -392,242 +474,334 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
     [text, activeContexts]
   );
 
-  const steps = [
-    { icon: Shield, label: "Securing your request", desc: "Checking where you're looking" },
-    { icon: Search, label: "Understanding your question", desc: "Figuring out what you need" },
-    { icon: Eye, label: "Analyzing from space", desc: "Our AI looks at the imagery" },
-    { icon: FileCheck, label: "Verifying the evidence", desc: "Making sure it's really there" },
-    { icon: Zap, label: "Crafting your answer", desc: "Writing a clear, evidence-based response" },
-  ];
-
   return (
-    // Main container: full viewport height, flex column, no overflow hidden to keep input bar visible
-    <div className="relative min-h-screen flex flex-col bg-[#02040F]">
+    <div className="relative min-h-screen flex flex-col" style={{ background: "#02040F" }}>
       <Starfield />
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#02040F]/90 pointer-events-none" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_900px_520px_at_50%_36%,transparent_42%,rgba(2,4,15,0.58)_78%)] pointer-events-none" />
       <EarthHalf />
 
-      {/* Center content – flex-1 so it pushes the composer down */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-10">
+      {/* Radial vignette to focus center */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(ellipse 900px 560px at 50% 38%, transparent 40%, rgba(2,4,15,0.5) 75%)",
+          zIndex: 6,
+        }}
+      />
+
+      {/* ── Hero content ───────────────────────────────────────────────── */}
+      <div className="relative flex-1 flex flex-col items-center justify-end px-6 pb-8 bottom-24" style={{ zIndex: 10 }}>
         <motion.div
-          initial={{ opacity: 0, y: 12 }}
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: [0.25, 0.1, 0.25, 1] }}
-          className="w-full max-w-[680px] flex flex-col items-center text-center"
+          transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-[680px] flex flex-col items-center text-center mb-6"
         >
-          <div className="h-12 w-12 rounded-full bg-[#0A0F1A]/80 backdrop-blur border border-white/10 grid place-items-center shadow-[0_0_24px_rgba(6,182,212,0.3)]">
-            <span className="h-3 w-3 rounded-full bg-[#22C55E] animate-pulse shadow-[0_0_12px_rgba(34,197,94,0.9)]" />
+          {/* Satellite beacon — lamp + cone signal behind text/input (elegant, z-index back) */}
+          <div className="relative mb-5" style={{ width: 56, height: 56 }}>
+            {/* Cone beam — static soft base (more visible for debugging) */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-1/2 top-[28px] -translate-x-1/2 -z-10"
+              style={{
+                width: "720px",
+                height: "560px",
+                background: "linear-gradient(180deg, rgba(6,182,212,0.18) 0%, rgba(6,182,212,0.08) 32%, rgba(6,182,212,0.03) 58%, transparent 82%)",
+                clipPath: "polygon(49.35% 0%, 50.65% 0%, 84% 100%, 16% 100%)",
+                filter: "blur(0.7px)",
+                opacity: 0.9,
+              }}
+            />
+            {/* Sweeping lamp beam — smooth down and back, repeats (motion-driven for reliability) */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-1/2 top-[28px] -translate-x-1/2 -z-10 overflow-hidden"
+              style={{
+                width: "720px",
+                height: "560px",
+                clipPath: "polygon(49.35% 0%, 50.65% 0%, 84% 100%, 16% 100%)",
+              }}
+            >
+              <motion.div
+                className="absolute inset-x-0"
+                style={{
+                  top: "-20%",
+                  height: "55%",
+                  background: "linear-gradient(180deg, transparent 0%, rgba(6,182,212,0.38) 18%, rgba(6,182,212,0.26) 38%, rgba(255,255,255,0.14) 52%, transparent 78%)",
+                  filter: "blur(0.5px)",
+                  willChange: "transform",
+                }}
+                animate={{ y: ["-28%", "28%"] }}
+                transition={{ duration: 3.2, repeat: Infinity, repeatType: "reverse", ease: "easeInOut" }}
+              />
+            </div>
+            {/* Lamp halo behind satellite */}
+            <div className="absolute inset-0 rounded-full bg-[#06B6D4]/20 blur-[18px] -z-10" style={{ transform: "scale(1.45)" }} />
+            <div
+              className="relative h-14 w-14 rounded-full bg-[#05080F]/90 backdrop-blur border border-white/10 grid place-items-center"
+              style={{ boxShadow: "0 0 24px rgba(6,182,212,0.22), 0 0 0 1px rgba(255,255,255,0.04) inset, 0 0 18px rgba(6,182,212,0.12) inset" }}
+            >
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden>
+                {/* left panel */}
+                <rect x="3.5" y="12.5" width="7.5" height="7" rx="0.7" fill="#0F1A2E" stroke="#1E3A5F" strokeWidth="0.7" />
+                <line x1="4.5" y1="15" x2="10" y2="15" stroke="#1E3A5F" strokeWidth="0.4" opacity="0.6" />
+                <line x1="4.5" y1="17.2" x2="10" y2="17.2" stroke="#1E3A5F" strokeWidth="0.4" opacity="0.6" />
+                {/* right panel */}
+                <rect x="21" y="12.5" width="7.5" height="7" rx="0.7" fill="#0F1A2E" stroke="#1E3A5F" strokeWidth="0.7" />
+                <line x1="22" y1="15" x2="27.5" y2="15" stroke="#1E3A5F" strokeWidth="0.4" opacity="0.6" />
+                <line x1="22" y1="17.2" x2="27.5" y2="17.2" stroke="#1E3A5F" strokeWidth="0.4" opacity="0.6" />
+                {/* body */}
+                <rect x="12.2" y="10.2" width="7.6" height="9.2" rx="1.2" fill="#0B1120" stroke="#06B6D4" strokeWidth="1" />
+                <rect x="13.6" y="12" width="4.8" height="2.2" rx="0.6" fill="#06B6D4" opacity="0.9" />
+                <circle cx="16" cy="17.2" r="1" fill="#1E3A5F" />
+                {/* dish/antenna */}
+                <circle cx="16" cy="7.2" r="2" fill="none" stroke="#06B6D4" strokeWidth="0.9" opacity="0.95" />
+                <circle cx="16" cy="7.2" r="0.9" fill="#06B6D4" />
+                <line x1="16" y1="9.2" x2="16" y2="10.2" stroke="#06B6D4" strokeWidth="0.9" />
+              </svg>
+              {/* lamp — nadir */}
+              <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 h-2 w-2 rounded-full bg-[#06B6D4] animate-pulse" style={{ boxShadow: "0 0 10px rgba(6,182,212,0.95), 0 0 22px rgba(6,182,212,0.55)" }} />
+            </div>
           </div>
 
-          <h1 className="mt-5 text-[32px] sm:text-[38px] font-bold tracking-tight">
-            <span className="bg-gradient-to-r from-[#F8FAFC] via-[#93C5FD] to-[#06B6D4] bg-clip-text text-transparent drop-shadow-[0_2px_16px_rgba(0,0,0,0.8)]">
+          <h1 className="text-[36px] sm:text-[44px] font-bold tracking-[-0.035em] leading-tight">
+            <span
+              className="bg-clip-text text-transparent"
+              style={{
+                backgroundImage:
+                  "linear-gradient(135deg, #F1F5F9 0%, #BAE6FD 40%, #06B6D4 80%)",
+                filter: "drop-shadow(0 2px 20px rgba(0,0,0,0.9))",
+              }}
+            >
               Where should we look?
             </span>
           </h1>
 
-          <p className="mt-3 text-[15px] leading-relaxed text-[#94A3B8] max-w-[48ch]">
-            Ask in plain language. Satiq plans, crops, and grounds with{" "}
-            <span className="text-[#93C5FD] font-medium">Qwen 3.5 9B</span> — every detection is auditable.
+          <p className="mt-3.5 text-[15px] leading-relaxed text-slate-500 max-w-[42ch]">
+            Ask in plain language. Satiq reasons across satellite imagery,{" "}
+            <span className="text-slate-400 font-medium">spatial evidence</span>, and terrain —{" "}
+            every detection is auditable.
           </p>
 
-          <div className="mt-4 flex items-center gap-2 text-[12px] text-[#64748B]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#64748B]" />
-            No example cards — just ask
-            <span className="h-1.5 w-1.5 rounded-full bg-[#334155]" />
-            Try “water body in the north”
+          {/* Example query cards */}
+          <div className="w-full mt-8 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {EXAMPLE_QUERIES.map((ex) => (
+              <ExampleCard key={ex.query} example={ex} onClick={handleSend} />
+            ))}
           </div>
-
-          {/* Demo — how image will appear in chat response (conditional, graceful) */}
-          
-
-          {/* How Satiq investigates */}
-         
         </motion.div>
-      </div>
 
-      {/* ========== COMPOSER – always at bottom, no clipping ========== */}
-      <div className="relative z-10 shrink-0 p-4 pb-36">
-        <div
-          ref={containerRef}
-          className={cn(
-            "mx-auto max-w-[680px] rounded-2xl transition-all duration-200 will-change-transform",
-            "bg-[#0A0F1A]/80 backdrop-blur-xl border",
-            focused
-              ? "border-[#06B6D4] shadow-[0_0_0_2px_rgba(6,182,212,0.35),0_16px_48px_rgba(0,0,0,0.6)] scale-[1.015]"
-              : "border-slate-800/60 shadow-[0_8px_32px_rgba(0,0,0,0.5),0_1px_0_rgba(255,255,255,0.04)_inset] scale-100",
-            dragOver && "border-[#06B6D4] bg-slate-800/30 shadow-[0_0_0_2px_rgba(6,182,212,0.45)]",
-            isSending && "opacity-60 pointer-events-none"
-          )}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
-          style={{ minHeight: focused ? 60 : 56 }}
-        >
-          {/* Active context — spec subtle */}
-          <div className="px-3 pt-3 flex items-center gap-2">
-            <div className="h-6 w-6 rounded-md bg-[#090D14] border border-slate-800/60 grid place-items-center shrink-0">
-              <MapPin size={10} className="text-[#06B6D4]" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-semibold tracking-wide text-slate-400 uppercase leading-none">
-                {activeContexts.find((c) => c.type === "aoi") ? "AOI selected" : active?.category === "change" ? "Comparing" : active?.category === "fusion" ? "Multi-modal" : "Selected context"}
+        {/* ── Composer ──────────────────────────────────────────────────── */}
+        <div className="w-full max-w-[680px]">
+          <div
+            ref={containerRef}
+            className={cn(
+              "rounded-2xl transition-all duration-200 will-change-transform",
+              "bg-[#0B1120]/90 backdrop-blur-xl border",
+              focused
+                ? "border-[#06B6D4]/60 shadow-[0_0_0_2px_rgba(6,182,212,0.2),0_16px_48px_rgba(0,0,0,0.65)] scale-[1.012]"
+                : "border-slate-700/40 shadow-[0_8px_32px_rgba(0,0,0,0.55),0_1px_0_rgba(255,255,255,0.03)_inset] scale-100",
+              dragOver && "border-[#06B6D4]/70 shadow-[0_0_0_2px_rgba(6,182,212,0.35)]",
+              isSending && "opacity-60 pointer-events-none"
+            )}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            style={{ minHeight: 56 }}
+          >
+            {/* Context context-line */}
+            <div className="px-3.5 pt-3 flex items-center gap-2.5">
+              <div className="h-6 w-6 rounded-md bg-[#05080F] border border-slate-700/40 grid place-items-center shrink-0">
+                <MapPin size={10} className="text-[#06B6D4]" />
               </div>
-              <div className="text-xs text-slate-300 truncate leading-tight mt-0.5">
-                {activeContexts.find((c) => c.type === "aoi")?.label ??
-                  (active
-                    ? active.category === "change"
-                      ? "2021 Scene → 2023 Scene • AOI #004"
-                      : active.category === "fusion"
+              <div className="min-w-0 flex-1">
+                <div className="text-[10.5px] font-semibold tracking-[0.08em] text-slate-600 uppercase leading-none">
+                  {activeContexts.find((c) => c.type === "aoi")
+                    ? "AOI selected"
+                    : active?.category === "change"
+                    ? "Comparing"
+                    : active?.category === "fusion"
+                    ? "Multi-modal"
+                    : "Context"}
+                </div>
+                <div className="text-[12px] text-slate-400 truncate leading-tight mt-0.5">
+                  {activeContexts.find((c) => c.type === "aoi")?.label ??
+                    (active
+                      ? active.category === "change"
+                        ? "2021 Scene → 2023 Scene • AOI #004"
+                        : active.category === "fusion"
                         ? "Optical s2_001 + SAR s1_001 • Aligned"
                         : `${active.title} • Sentinel-2 • Aug 2026`
-                    : "No region selected • Select on map or attach imagery")}
+                      : "No region selected · Select on map or attach imagery")}
+                </div>
+              </div>
+              <span className="hidden sm:inline text-[10.5px] text-slate-700 shrink-0 font-mono">auto-sent</span>
+            </div>
+
+            {/* Context chips */}
+            <AnimatePresence>
+              {activeContexts.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="flex flex-wrap gap-1.5 px-3.5 pt-1.5 pb-1"
+                >
+                  {activeContexts.map((c) => (
+                    <ContextChip key={c.id} context={c} onRemove={removeContext} />
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Queued messages */}
+            {queuedMessages.length > 0 && (
+              <div className="mx-3.5 mt-1.5 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-2 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10.5px] font-semibold tracking-wide text-amber-300/80">
+                    QUEUED · {queuedMessages.length}/5 — will send after current response
+                  </span>
+                  <button
+                    onClick={() => useChatStore.getState().clearQueue()}
+                    className="text-[10.5px] text-slate-600 hover:text-rose-400 transition-colors"
+                  >
+                    Clear all
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {queuedMessages.map((q, idx) => (
+                    <div
+                      key={q.id}
+                      className="flex items-center gap-2 rounded-lg bg-[#05080F] border border-slate-800/50 px-2.5 py-2"
+                    >
+                      <span className="text-[10.5px] font-mono text-slate-600 shrink-0">#{idx + 1}</span>
+                      <span className="flex-1 truncate text-[12px] text-slate-300" title={q.content}>
+                        {q.content}
+                      </span>
+                      {q.contexts.length > 0 && (
+                        <span className="hidden sm:inline text-[10.5px] text-slate-600 shrink-0">
+                          +{q.contexts.length} ctx
+                        </span>
+                      )}
+                      <button
+                        onClick={() => removeQueued(q.id)}
+                        className="h-5 w-5 shrink-0 grid place-items-center rounded-full text-slate-600 hover:bg-rose-500/10 hover:text-rose-400 transition-colors"
+                        aria-label="Remove queued"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Input row */}
+            <div className="flex items-center gap-2 px-3 py-2.5">
+              <div className="flex items-center gap-1 shrink-0">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".tif,.tiff,.png,.jpg,.jpeg,.jp2"
+                  multiple
+                  hidden
+                  onChange={onFileInputChange}
+                  aria-label="Attach files"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-xl text-slate-600 hover:text-slate-300 hover:bg-white/5 transition-colors"
+                  onClick={() => fileRef.current?.click()}
+                  aria-label="Attach files"
+                  disabled={isSending}
+                >
+                  <Paperclip size={16} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-xl text-slate-600 hover:text-slate-300 hover:bg-white/5 transition-colors"
+                  onClick={addAoi}
+                  aria-label="Add AOI"
+                  disabled={isSending}
+                >
+                  <MapPin size={16} />
+                </Button>
+              </div>
+
+              <textarea
+                ref={taRef}
+                autoFocus={autoFocus}
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  resizeTextarea();
+                }}
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
+                onKeyDown={onKeyDown}
+                rows={1}
+                placeholder={
+                  isBusy
+                    ? "Follow-up will be queued — type and hit enter"
+                    : "Ask anything about the selected imagery or region..."
+                }
+                aria-label="Ask Satiq"
+                disabled={isSending}
+                className="composer-input flex-1 self-center bg-transparent text-[14px] leading-6 text-slate-100 placeholder:text-slate-600 !outline-none focus:!outline-none focus-visible:!outline-none focus:ring-0 focus-visible:ring-0 focus:border-transparent focus-visible:border-transparent focus:shadow-none focus-visible:shadow-none ring-0 shadow-none border-0 resize-none py-1.5 max-h-[144px] min-h-[36px] overflow-y-auto"
+                style={{ height: "36px" }}
+              />
+
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="hidden sm:block text-[10.5px] text-slate-700 select-none font-mono">⌘K · Shift+Enter</span>
+                <motion.button
+                  whileHover={canSend ? { scale: 1.06 } : {}}
+                  whileTap={canSend ? { scale: 0.91 } : {}}
+                  onClick={() => handleSend()}
+                  disabled={!canSend}
+                  className={cn(
+                    "h-8 w-8 rounded-full grid place-items-center transition-all duration-200",
+                    canSend
+                      ? isBusy
+                        ? "bg-amber-500 text-white shadow-[0_3px_14px_rgba(245,158,11,0.4)] hover:bg-amber-400"
+                        : "bg-gradient-to-br from-[#06B6D4] to-[#0891B2] text-white shadow-[0_3px_16px_rgba(6,182,212,0.45)] hover:shadow-[0_5px_22px_rgba(6,182,212,0.6)]"
+                      : "bg-[#0B1120] text-slate-700 cursor-not-allowed"
+                  )}
+                  aria-label={isBusy ? "Queue message" : "Send"}
+                >
+                  {isSending ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : isBusy && canSend ? (
+                    <Clock3 size={16} />
+                  ) : (
+                    <ArrowUp size={16} />
+                  )}
+                </motion.button>
               </div>
             </div>
-            <span className="hidden sm:inline text-[11px] text-slate-500 shrink-0">auto-sent</span>
           </div>
 
+          {/* Error */}
           <AnimatePresence>
-            {activeContexts.length > 0 && (
+            {error && (
               <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2 }}
-                className="flex flex-wrap gap-1.5 px-3 pt-1 pb-1"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                className="mt-2 flex items-center gap-1.5 text-[12px] text-rose-400"
               >
-                {activeContexts.map((c) => (
-                  <ContextChip key={c.id} context={c} onRemove={removeContext} />
-                ))}
+                <AlertCircle size={13} />
+                <span>{error}</span>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {queuedMessages.length > 0 && (
-            <div className="mx-3 mt-1 rounded-lg border border-amber-500/20 bg-amber-500/[0.07] px-2.5 py-2 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold tracking-wide text-amber-300/90">QUEUED • {queuedMessages.length}/5 — will send after current response</span>
-                <button onClick={() => useChatStore.getState().clearQueue()} className="text-[11px] text-slate-500 hover:text-rose-400 transition-colors">Clear all</button>
-              </div>
-              <div className="space-y-1.5">
-                {queuedMessages.map((q, idx) => (
-                  <div key={q.id} className="flex items-center gap-2 rounded-lg bg-[#090D14] border border-slate-800/60 px-2.5 py-2">
-                    <span className="text-[11px] font-mono text-slate-500 shrink-0">#{idx + 1}</span>
-                    <span className="flex-1 truncate text-xs text-slate-300" title={q.content}>{q.content}</span>
-                    {q.contexts.length > 0 && <span className="hidden sm:inline text-[11px] text-slate-500 shrink-0">+{q.contexts.length} ctx</span>}
-                    <button onClick={() => removeQueued(q.id)} className="h-6 w-6 shrink-0 grid place-items-center rounded-full text-slate-500 hover:bg-rose-500/10 hover:text-rose-400 transition-colors" aria-label="Remove queued">
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 px-3 py-2.5">
-            <div className="flex items-center gap-1 shrink-0">
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".tif,.tiff,.png,.jpg,.jpeg,.jp2"
-                multiple
-                hidden
-                onChange={onFileInputChange}
-                aria-label="Attach files"
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 rounded-xl text-[#64748B] hover:text-[#F8FAFC] hover:bg-white/5 transition-colors focus-visible:ring-2 focus-visible:ring-cyan-400"
-                onClick={() => fileRef.current?.click()}
-                aria-label="Attach files"
-                disabled={isSending}
-              >
-                <Paperclip size={17} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 rounded-xl text-[#64748B] hover:text-[#F8FAFC] hover:bg-white/5 transition-colors focus-visible:ring-2 focus-visible:ring-cyan-400"
-                onClick={addAoi}
-                aria-label="Add AOI"
-                disabled={isSending}
-              >
-                <MapPin size={17} />
-              </Button>
-            </div>
-
-            <textarea
-              ref={taRef}
-              autoFocus={autoFocus}
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                resizeTextarea();
-              }}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              onKeyDown={onKeyDown}
-              rows={1}
-              placeholder={isBusy ? "Follow-up will be queued — type and hit enter" : "Ask anything about the selected imagery or region..."}
-              aria-label="Ask Satiq"
-              disabled={isSending}
-              className="composer-input flex-1 self-center bg-transparent text-[15px] leading-6 text-[#F8FAFC] placeholder:text-[#64748B] !outline-none focus:!outline-none focus-visible:!outline-none focus:ring-0 focus-visible:ring-0 focus:border-transparent focus-visible:border-transparent focus:shadow-none focus-visible:shadow-none ring-0 shadow-none border-0 resize-none py-1.5 max-h-[144px] min-h-[36px] overflow-y-auto"
-              style={{ height: "36px" }}
-            />
-
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="hidden sm:block text-[11px] text-[#475569] select-none font-mono">⌘K · Shift+Enter</span>
-              <motion.button
-                whileHover={canSend ? { scale: 1.05 } : {}}
-                whileTap={canSend ? { scale: 0.92 } : {}}
-                onClick={() => handleSend()}
-                disabled={!canSend}
-                className={cn(
-                  "h-9 w-9 rounded-full grid place-items-center transition-all duration-200",
-                  canSend
-                    ? isBusy
-                      ? "bg-amber-500 text-white shadow-[0_4px_16px_rgba(245,158,11,0.4)] hover:bg-amber-600"
-                      : "bg-gradient-to-br from-[#06B6D4] to-[#0891b2] text-white shadow-[0_4px_16px_rgba(6,182,212,0.5)] hover:shadow-[0_6px_24px_rgba(6,182,212,0.7)] active:shadow-inner"
-                    : "bg-[#0D121F] text-[#475569] cursor-not-allowed"
-                )}
-                aria-label={isBusy ? "Queue message" : "Send"}
-                title={isBusy ? "Response in progress — will be queued" : "Send"}
-              >
-                {isSending ? <Loader2 size={17} className="animate-spin" /> : isBusy && canSend ? <Clock3 size={17} /> : <ArrowUp size={17} />}
-              </motion.button>
-            </div>
+          {/* Footer disclaimer */}
+          <div className="mt-3 text-center text-[10.5px] leading-relaxed text-slate-700">
+            Satiq can make mistakes. Verify findings with evidence.
           </div>
-        </div>
-
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="mx-auto max-w-[680px] mt-2 flex items-center gap-1.5 text-xs text-rose-400"
-            >
-              <AlertCircle size={14} />
-              <span>{error}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {focused && !isSending && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mx-auto max-w-[680px] mt-3 flex gap-1.5 overflow-x-auto no-scrollbar flex-nowrap md:flex-wrap md:overflow-visible pb-1"
-          >
-            {CAPABILITY_HINTS.map((h) => (
-              <HintButton key={h} hint={h} onClick={handleSend} />
-            ))}
-          </motion.div>
-        )}
-
-        <div className="mx-auto max-w-[680px] mt-3 text-center text-[11px] leading-relaxed text-[#475569]">
-          Satiq can make mistakes. Verify with evidence · Earth horizon is live SVG · no external image
         </div>
       </div>
     </div>
