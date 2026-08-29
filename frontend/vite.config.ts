@@ -49,5 +49,16 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom") || id.includes("node_modules/react-router")) return "vendor";
+          if (id.includes("node_modules/maplibre-gl")) return "map";
+          if (id.includes("node_modules/apexcharts") || id.includes("node_modules/react-apexcharts")) return "charts";
+          if (id.includes("node_modules/react-markdown") || id.includes("node_modules/remark-gfm")) return "markdown";
+          if (id.includes("node_modules/zustand") || id.includes("node_modules/lucide-react") || id.includes("node_modules/motion")) return "ui";
+        },
+      },
+    },
   },
 });

@@ -395,9 +395,16 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
         try {
           await executeRealAnalysis(finalMessage, snapshot as any);
         } catch (err) {
-          // fallback to mock for offline/demo — preserves UX when gateway/orchestrator not reachable
-          console.warn("[analysis] gateway failed, falling back to mock:", err);
-          await simulateAnalysisQuery(finalMessage, snapshot as any);
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error("[analysis] gateway/orchestrator offline:", msg);
+          // Show explicit offline error — do NOT silently fall back to mock (per spec: mock only when ANALYSIS_PROVIDER=mock)
+          // The agentic provider already emitted an error event via applyExecutionEvent; just surface banner
+          setError(`Backend offline — agentic pipeline unreachable. ${msg.slice(0,120)}`);
+          // Optional: if developer explicitly wants mock fallback, set VITE_USE_MOCK=true
+          if ((import.meta as any).env?.VITE_USE_MOCK === "true") {
+            console.warn("[analysis] VITE_USE_MOCK=true — falling back to mock");
+            await simulateAnalysisQuery(finalMessage, snapshot as any);
+          }
         } finally {
           setIsSending(false);
         }
@@ -416,8 +423,13 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
           addMessage({ id: Date.now().toString(), role: "user", content: combinedContent, contexts: combinedContexts });
           try {
             await executeRealAnalysis(combinedContent, combinedContexts as any);
-          } catch {
-            await simulateAnalysisQuery(combinedContent, combinedContexts as any);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            (useChatStore.getState() as any).setError?.(msg);
+            console.error("[analysis] queued gateway offline:", msg);
+            if ((import.meta as any).env?.VITE_USE_MOCK === "true") {
+              await simulateAnalysisQuery(combinedContent, combinedContexts as any);
+            }
           }
         }, 250);
       }

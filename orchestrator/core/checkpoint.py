@@ -42,16 +42,65 @@ def compute_request_key(
     # final hash short
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
+_redis_client = None  # lazy sync redis for cross-process persistence
+
+def _get_redis():
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    try:
+        import redis  # type: ignore
+        import os as _os
+        url = _os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        c = redis.from_url(url, socket_connect_timeout=0.5, socket_timeout=0.5)
+        c.ping()
+        _redis_client = c
+        return c
+    except Exception:
+        _redis_client = False  # type: ignore
+        return None
+
+def _redis_key(request_key: str, stage: str) -> str:
+    return f"satiq:ckpt:{request_key}:{stage}"
+
 def save_checkpoint(request_key: str, stage: str, payload: Dict[str, Any]):
     if not request_key or stage not in CHECKPOINT_STAGES:
         return
+    # Try Redis first (cross-process), fallback to memory
+    r = _get_redis()
+    if r is not None:
+        try:
+            import json as _json
+            # need to handle ndarray → safe json via pickle fallback: store as json with _raw stripped for Redis
+            safe = {k: v for k, v in payload.items() if k != "_embeddings_raw"}
+            # embeddings raw contains ndarrays not json-serializable; skip for Redis, memory keeps full
+            r.setex(_redis_key(request_key, stage), 3600, _json.dumps(safe, default=str))
+        except Exception:
+            pass
     bucket = _STORE.setdefault(request_key, {})
-    # shallow copy to avoid mutation
     bucket[stage] = dict(payload)
 
 def load_checkpoint(request_key: str, stage: str) -> Optional[Dict[str, Any]]:
     if not request_key:
         return None
+    # Try Redis first
+    r = _get_redis()
+    if r is not None:
+        try:
+            import json as _json
+            v = r.get(_redis_key(request_key, stage))
+            if v is not None:
+                if isinstance(v, bytes):
+                    v = v.decode()
+                data = _json.loads(v)
+                # _embeddings_raw not in Redis; will need memory fallback if caller needs it
+                # If memory also has it, merge
+                mem = _STORE.get(request_key, {}).get(stage)
+                if mem and "_embeddings_raw" in mem:
+                    data["_embeddings_raw"] = mem["_embeddings_raw"]
+                return data
+        except Exception:
+            pass
     bucket = _STORE.get(request_key)
     if not bucket:
         return None
@@ -64,10 +113,35 @@ def has_checkpoint(request_key: str, stage: str) -> bool:
     return load_checkpoint(request_key, stage) is not None
 
 def clear_checkpoint(request_key: str):
+    r = _get_redis()
+    if r is not None:
+        try:
+            for stage in CHECKPOINT_STAGES:
+                r.delete(_redis_key(request_key, stage))
+        except Exception:
+            pass
     _STORE.pop(request_key, None)
 
 def hit_count(request_key: str) -> int:
-    return len(_STORE.get(request_key, {}))
+    # count memory + redis
+    c = len(_STORE.get(request_key, {}))
+    r = _get_redis()
+    if r is not None:
+        try:
+            for stage in CHECKPOINT_STAGES:
+                if r.exists(_redis_key(request_key, stage)):
+                    c = max(c, 1)
+        except Exception:
+            pass
+    return c
 
 def reset_store():
+    r = _get_redis()
+    if r is not None:
+        try:
+            # delete all ckpt keys (scan)
+            for k in r.scan_iter(match="satiq:ckpt:*"):
+                r.delete(k)
+        except Exception:
+            pass
     _STORE.clear()

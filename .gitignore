@@ -85,3 +85,13 @@ rs-outputs
 history
 reports
 rs-raw
+# Orchestrator artifacts (local fallbacks)
+orchestrator/storage/
+orchestrator/satiq.db
+satiq.db
+*.db
+*.sqlite
+# Test artifacts
+RESULTS.md
+.pytest_cache/
+.coverage
