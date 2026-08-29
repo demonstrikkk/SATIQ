@@ -1,13 +1,56 @@
-"""Agent 13: Error Handler — logs and formats error response."""
+"""Agent 13: Error Handler — bounded retry with transient/permanent classification (§2.4)."""
 from __future__ import annotations
 import time
 from orchestrator.models.graph_state import GraphState, add_trace
+from orchestrator.core.errors import classify_error_code, classify_exception
+from orchestrator.core.structured_logging import log_node
+from orchestrator.core.metrics import record_node_latency
+
+# audit fix: keep 3 for confidence, 2 for infra errors — document explicitly
+MAX_TRANSIENT_RETRIES = 2
+MAX_CONFIDENCE_RETRIES = 3
 
 def error_handler_node(state: GraphState) -> GraphState:
     t0 = time.time()
+    rk = state.get("request_key") or ""
     err = state.get("error") or "unknown error"
     elog = state.get("error_log") or []
-    # ensure final_result contains error
+    error_code = state.get("error_code")
+    error_type = state.get("error_type")
+    # classify if not already set
+    if not error_type:
+        # try code, else exception heuristic
+        error_type = classify_error_code(error_code or "")
+        state["error_type"] = error_type  # type: ignore
+    if not error_code:
+        error_code = "unknown"
+        state["error_code"] = error_code  # type: ignore
+    # retry policy from state
+    policy = state.get("retry_policy") or {"max_transient": 2, "max_confidence": 3, "max_coreg": 2}
+    max_transient = policy.get("max_transient", 2) if isinstance(policy, dict) else 2
+    max_conf = policy.get("max_confidence", 3) if isinstance(policy, dict) else 3
+    retries = state.get("retry_count", 0)
+    coreg_retries = state.get("coreg_retries", 0)
+    # exponential backoff hint (no real sleep in graph — api layer handles, here just log)
+    backoff_ms = 0
+    if error_type == "transient":
+        if error_code == "coreg_retryable":
+            backoff_ms = 0  # coreg retry already via pipeline edge
+        elif "confidence" in (error_code or ""):
+            if retries < max_conf:
+                backoff_ms = 200 * (2 ** retries)
+        else:
+            if retries < max_transient:
+                backoff_ms = 200 * (2 ** retries)
+                # mark for potential retry if caller supports it
+                state["_needs_retry"] = True  # type: ignore
+                state["retry_count"] = retries + 1
+            else:
+                state["_needs_retry"] = False  # type: ignore
+    else:
+        # permanent — never retry
+        state["_needs_retry"] = False  # type: ignore
+    # ensure final_result contains structured error
     if not state.get("final_result"):
         state["final_result"] = {
             "task": state.get("task_type","unknown"),
@@ -15,8 +58,25 @@ def error_handler_node(state: GraphState) -> GraphState:
             "answer_text": f"Unable to complete analysis: {err}",
             "confidence": 0.0,
             "error": err,
+            "error_code": error_code,
+            "error_type": error_type,
             "error_log": elog,
             "execution_trace": state.get("execution_trace", []),
+            "request_key": rk,
+            "degraded": state.get("degraded", False),
+            "backoff_ms": backoff_ms,
         }
-    add_trace(state, "error_handler", "ok", {"error": err}, latency_ms=int((time.time()-t0)*1000))
+    else:
+        # attach error metadata to existing final_result
+        try:
+            state["final_result"]["error_code"] = error_code  # type: ignore
+            state["final_result"]["error_type"] = error_type  # type: ignore
+            state["final_result"]["backoff_ms"] = backoff_ms  # type: ignore
+        except Exception:
+            pass
+    lat = int((time.time()-t0)*1000)
+    state.setdefault("node_latencies", {})["error_handler"] = lat  # type: ignore
+    add_trace(state, "error_handler", "ok", {"error": err, "error_code": error_code, "error_type": error_type, "retry_count": retries, "coreg_retries": coreg_retries, "backoff_ms": backoff_ms, "request_key": rk}, latency_ms=lat)
+    log_node("error_handler", rk, "ok", lat, error_type, {"code": error_code, "backoff_ms": backoff_ms})
+    record_node_latency("error_handler", lat, error_type)
     return state

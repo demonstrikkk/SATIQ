@@ -33,24 +33,58 @@ def after_compat(state: GraphState) -> Literal["coreg_gate","error_handler"]:
 def after_coreg_gate(state: GraphState) -> Literal["vision_encoder","preprocessing","error_handler"]:
     if state.get("coreg_passed"):
         return "vision_encoder"
-    # retry up to 2
+    policy = state.get("retry_policy") or {"max_coreg": 2}
+    max_coreg = policy.get("max_coreg", 2) if isinstance(policy, dict) else 2
     retries = state.get("coreg_retries", 0)
-    if retries < 2:
-        return "preprocessing"  # retry preprocessing (re-tile / re-coreg)
-    # after max retries, fail
+    # audit #4: transient while retries <= max, permanent after
+    if retries <= max_coreg:
+        # transient — retry preprocessing (re-tile / re-coreg with higher GCP)
+        return "preprocessing"
     state["error"] = f"coreg failed after {retries} retries (ssim={state.get('coreg',{}).get('ssim')})"
+    state["error_type"] = "permanent"
+    state["error_code"] = "coreg_ssim_below_threshold"
     return "error_handler"
 
 def after_post_processing(state: GraphState) -> Literal["task_agent","response_composer","error_handler"]:
     if state.get("_needs_retry"):
+        policy = state.get("retry_policy") or {"max_confidence": 3}
+        max_conf = policy.get("max_confidence", 3) if isinstance(policy, dict) else 3
         retries = state.get("retry_count", 0)
-        if retries <= 3:
+        if retries <= max_conf:
             return "task_agent"
         state["error"] = f"low confidence after {retries} retries"
+        state["error_type"] = "permanent"
+        state["error_code"] = "low_confidence_permanent"
         return "error_handler"
     if state.get("final_result") is None and state.get("error"):
+        # if error is permanent, go to error_handler; if transient and retries left, error_handler will decide
         return "error_handler"
     return "response_composer"
+
+def after_vision_encoder(state: GraphState) -> Literal["fusion","vision_encoder","error_handler"]:
+    # node increments retry_count on transient; pure routing here
+    if state.get("error_type") == "transient" and state.get("error_code") in ("vision_encoder_timeout","node_timeout","gpu_oom","connection_reset","fusion_llm_timeout"):
+        policy = state.get("retry_policy") or {"max_transient": 2}
+        max_tr = policy.get("max_transient", 2) if isinstance(policy, dict) else 2
+        retries = state.get("retry_count", 0)
+        # retries is already incremented by node (1 after first failure, 2 after second, etc.)
+        # allow up to max_tr retries → total attempts = max_tr + 1
+        if retries <= max_tr:
+            return "vision_encoder"
+    if state.get("error"):
+        return "error_handler"
+    return "fusion"
+
+def after_fusion(state: GraphState) -> Literal["task_agent","fusion","error_handler"]:
+    if state.get("error_type") == "transient" and state.get("error_code") in ("fusion_llm_timeout","node_timeout","circuit_open","gpu_oom","vision_encoder_timeout"):
+        policy = state.get("retry_policy") or {"max_transient": 2}
+        max_tr = policy.get("max_transient", 2) if isinstance(policy, dict) else 2
+        retries = state.get("retry_count", 0)
+        if retries <= max_tr:
+            return "fusion"
+    if state.get("error"):
+        return "error_handler"
+    return "task_agent"
 
 def after_task_agent(state: GraphState) -> Literal["tile_manager","error_handler"]:
     if state.get("error") and not state.get("task_output"):
@@ -91,8 +125,8 @@ def build_graph():
     g.add_conditional_edges("encoder_compat", after_compat, {"coreg_gate":"coreg_gate", "error_handler":"error_handler"})
     # FIX #2: coreg_gate retry goes explicitly to preprocessing (not error_handler until max retries)
     g.add_conditional_edges("coreg_gate", after_coreg_gate, {"vision_encoder":"vision_encoder", "preprocessing":"preprocessing", "error_handler":"error_handler"})
-    g.add_edge("vision_encoder", "fusion")
-    g.add_edge("fusion", "task_agent")
+    g.add_conditional_edges("vision_encoder", after_vision_encoder, {"fusion":"fusion", "vision_encoder":"vision_encoder", "error_handler":"error_handler"})
+    g.add_conditional_edges("fusion", after_fusion, {"task_agent":"task_agent", "fusion":"fusion", "error_handler":"error_handler"})
     g.add_conditional_edges("task_agent", after_task_agent, {"tile_manager":"tile_manager", "error_handler":"error_handler"})
     # Note FIX #3: Tile Manager is a persistent state service — preprocessing writes tile list to Redis/state,
     # task_agent updates per-tile status; graph shows sequential task_agent → tile_manager → post_processing

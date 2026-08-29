@@ -64,6 +64,8 @@ How will we prove it works? (tests, benchmark, compose check — paste command/o
 | [0002](0002-api-gateway.md) | Implement API gateway and rate limiter | Accepted | 2026-08-28 |
 | [0003](0003-frontend-workstation.md) | Frontend Analysis Workstation (Phase 0–12) | Accepted | 2026-08-28 |
 | [0004](0004-orchestrator-pipeline.md) | Orchestrator LangGraph Pipeline with Dummy Vision & Mocked Qwen 3.5 9B | Accepted | 2026-08-29 |
+| [0005](0005-resilience-optimization.md) | Pipeline Resilience & Performance Optimization | Accepted | 2026-08-29 |
+| [0006](0006-full-integration.md) | Full System Integration Frontend↔Gateway↔Orchestrator | Accepted | 2026-08-29 |
 
 ## Existing ADRs
 
@@ -72,5 +74,7 @@ How will we prove it works? (tests, benchmark, compose check — paste command/o
 * `0002-api-gateway.md` — API gateway and rate limiter implementation
 * `0003-frontend-workstation.md` — frontend workstation (Phase 0–12)
 * `0004-orchestrator-pipeline.md` — orchestrator LangGraph pipeline with dummy vision & mocked Qwen
+* `0005-resilience-optimization.md` — pipeline resilience (timeout, retry, circuit breaker, checkpoint, queue, TTL cache)
+* `0006-full-integration.md` — full integration frontend↔gateway↔orchestrator (agentic bridge, mock LLM, Docker)
 
 Create new ADRs by copying the template above. Link them from `docs/DECISIONS.md` Index and from this table.

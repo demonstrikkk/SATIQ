@@ -22,11 +22,10 @@ export function selectProvider(env: NodeJS.ProcessEnv = process.env): AnalysisPr
     return new MockAnalysisProvider();
   }
   if (kind === "agentic") {
-    // STUB: agentic pipeline not implemented yet — falls back to mock with a loud warning.
-    console.warn("[analysis] ANALYSIS_PROVIDER=agentic requested but not implemented; using mock.");
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { MockAnalysisProvider } = require("./mock-analysis.provider");
-    return new MockAnalysisProvider();
+    const { AgenticAnalysisProvider } = require("./agentic-analysis.provider");
+    console.log("[analysis] Using AgenticAnalysisProvider →", env.ORCHESTRATOR_URL ?? "http://localhost:8000");
+    return new AgenticAnalysisProvider();
   }
   throw new Error(`Unknown ANALYSIS_PROVIDER "${kind}". Valid values: mock, agentic.`);
 }

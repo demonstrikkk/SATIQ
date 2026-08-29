@@ -1,8 +1,11 @@
-"""Agent 5: Encoder Compat Check — gate."""
+"""Agent 5: Encoder Compat Check — gate (§2.7 explicit reject + §2.9 TTL cache)."""
 from __future__ import annotations
 import time
 from typing import List, Dict, Any
 from orchestrator.models.graph_state import GraphState, add_trace
+from orchestrator.core.structured_logging import log_node
+from orchestrator.core.metrics import record_node_latency
+from orchestrator.core.ttl_cache import encoder_cache
 
 COMPAT = {
     "croma": {"needs": ["optical","sar"], "min_assets": 2},
@@ -41,7 +44,18 @@ def check_required_bands(asset: Dict[str, Any], required_bands: List[str]) -> Di
 
 def encoder_compat_node(state: GraphState) -> GraphState:
     t0 = time.time()
+    rk = state.get("request_key") or ""
+    # TTL cache (§2.9): encoder mapping lookup is rule-table — cache hit short-circuits but still validates
     encoder = state.get("encoder","satmae")
+    # cache key = modality list + encoder
+    try:
+        mods_key = "|".join(sorted([a.get("modality","") for a in (state.get("assets") or []) if isinstance(a, dict)]))
+        cache_key = f"{mods_key}:{encoder}"
+        if encoder_cache.get(cache_key):
+            # hit — still need to run validation but count hit
+            state.setdefault("checkpoint_hits", []).append("encoder_cache")  # type: ignore
+    except Exception:
+        pass
     assets = state.get("assets") or []
     image_ids = state.get("image_ids") or []
     plan = state.get("plan") or {}
@@ -98,24 +112,45 @@ def encoder_compat_node(state: GraphState) -> GraphState:
 
     state["compat_passed"] = passed
     state["encoder_ready"] = True
-    # propagate requires_coreg from plan if present
     plan = state.get("plan") or {}
-    # StepPlan.requires_coreg or inferred from task_type
     rc = plan.get("requires_coreg")
     if rc is None:
         rc = state.get("task_type") in ("change_vqa","optical_sar_fusion")
-        # single-image VQA/grounding/captioning → no coreg
         if state.get("task_type") in ("vqa","grounding","captioning"):
             rc = False
     state["requires_coreg"] = bool(rc)
+    lat = int((time.time()-t0)*1000)
+    state.setdefault("node_latencies", {})["encoder_compat"] = lat  # type: ignore
     if not passed:
         state["error"] = reason
+        # explicit reject exit (§2.7): permanent failure, no retry
+        # distinguish sensor vs band vs modality
+        code = "band_count_mismatch"
+        low = (reason or "").lower()
+        if "sensor" in low or "unsupported_sensor" in low:
+            code = "unsupported_sensor"
+        elif "encoder_modality" in low or "modality" in low:
+            code = "encoder_modality_mismatch"
+        state["error_type"] = "permanent"
+        state["error_code"] = code
         state.setdefault("error_log", []).append(reason or "compat failed")  # type: ignore
-        add_trace(state, "encoder_compat", "failed", {"encoder": encoder, "reason": reason, "requires_coreg": state["requires_coreg"], "band_reports": band_reports}, latency_ms=int((time.time()-t0)*1000))
+        add_trace(state, "encoder_compat", "failed", {"encoder": encoder, "reason": reason, "requires_coreg": state["requires_coreg"], "band_reports": band_reports, "error_code": code, "error_type": "permanent"}, latency_ms=lat)
+        log_node("encoder_compat", rk, "failed", lat, "permanent", {"reason": reason, "code": code})
+        record_node_latency("encoder_compat", lat, "permanent")
     else:
-        # warn if band missing but still passing (Cartosat case)
         for rep in band_reports:
             if rep["missing"]:
                 state.setdefault("error_log", []).append(f"band warning {rep['asset_id']} missing {rep['missing']}")  # type: ignore
-        add_trace(state, "encoder_compat", "ok", {"encoder": encoder, "requires_coreg": state["requires_coreg"], "band_reports": band_reports}, latency_ms=int((time.time()-t0)*1000))
+        state["error_type"] = None
+        state["error_code"] = None
+        add_trace(state, "encoder_compat", "ok", {"encoder": encoder, "requires_coreg": state["requires_coreg"], "band_reports": band_reports}, latency_ms=lat)
+        log_node("encoder_compat", rk, "ok", lat, None, {"encoder": encoder})
+        record_node_latency("encoder_compat", lat)
+    # cache result
+    try:
+        mods_key = "|".join(sorted([a.get("modality","") for a in (state.get("assets") or []) if isinstance(a, dict)]))
+        cache_key2 = f"{mods_key}:{encoder}"
+        encoder_cache.set(cache_key2, {"compat_passed": passed, "encoder": encoder})
+    except Exception:
+        pass
     return state

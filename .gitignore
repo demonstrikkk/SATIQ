@@ -83,3 +83,5 @@ dist-ssr
 .claude
 rs-outputs
 history
+reports
+rs-raw

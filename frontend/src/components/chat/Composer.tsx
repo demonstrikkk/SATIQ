@@ -160,6 +160,7 @@ import { useChatStore, type ChatContext } from "@/store/chat.store";
 import { useWorkspaceStore } from "@/store/workspace.store";
 import { useExecutionStore } from "@/store/execution.store";
 import { simulateAnalysisQuery } from "@/mocks/mockStream";
+import { executeRealAnalysis } from "@/lib/analysisClient";
 import { analyses } from "@/mocks/analyses";
 import { cn } from "@/lib/utils";
 
@@ -361,9 +362,9 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
       }
     }, [active, activeContexts, addContext]);
 
-    // -------- Send logic — queues if response still streaming --------
+    // -------- Send logic — queues if response still streaming, proxies to gateway→orchestrator else fallback to mock --------
     const handleSend = useCallback(
-      (override?: string) => {
+      async (override?: string) => {
         const q = (override ?? text).trim();
         const hasContent = q.length > 0 || activeContexts.length > 0;
         if (!hasContent) return;
@@ -371,7 +372,6 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
         const finalMessage = q || "Analyze the attached imagery.";
         const snapshot = [...activeContexts] as ChatContext[];
 
-        // If busy, queue instead of immediate send
         if (isBusy) {
           if (queuedMessages.length >= 5) {
             setError("Queue full (5 max) — wait for current response or delete queued items.");
@@ -387,16 +387,20 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
 
         setIsSending(true);
         setError(null);
-
         if (onSend) onSend(finalMessage, snapshot);
-
         addMessage({ id: Date.now().toString(), role: "user", content: finalMessage, contexts: snapshot });
-        simulateAnalysisQuery(finalMessage, snapshot);
-
         setText("");
         if (taRef.current) taRef.current.style.height = "auto";
         clearContexts();
-        setIsSending(false);
+        try {
+          await executeRealAnalysis(finalMessage, snapshot as any);
+        } catch (err) {
+          // fallback to mock for offline/demo — preserves UX when gateway/orchestrator not reachable
+          console.warn("[analysis] gateway failed, falling back to mock:", err);
+          await simulateAnalysisQuery(finalMessage, snapshot as any);
+        } finally {
+          setIsSending(false);
+        }
       },
       [text, activeContexts, isBusy, queuedMessages.length, enqueue, clearContexts, onSend, addMessage]
     );
@@ -408,9 +412,13 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
         const combinedContent = all.map((q) => q.content).join("\n\n");
         const combinedContexts = Array.from(new Map(all.flatMap((q) => q.contexts).map((c) => [c.id, c] as const)).values());
         useChatStore.getState().clearQueue();
-        setTimeout(() => {
+        setTimeout(async () => {
           addMessage({ id: Date.now().toString(), role: "user", content: combinedContent, contexts: combinedContexts });
-          simulateAnalysisQuery(combinedContent, combinedContexts);
+          try {
+            await executeRealAnalysis(combinedContent, combinedContexts as any);
+          } catch {
+            await simulateAnalysisQuery(combinedContent, combinedContexts as any);
+          }
         }, 250);
       }
     }, [globalStatus, queuedMessages.length, addMessage]);

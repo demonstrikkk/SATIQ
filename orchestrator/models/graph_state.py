@@ -55,6 +55,18 @@ class GraphState(TypedDict, total=False):
     sub_queries: Annotated[Optional[List[str]], _last]
     spatial_aggregation: Annotated[Optional[str], _last]
     query_analysis: Annotated[Optional[Dict[str, Any]], _last]
+    # resilience (§2.3,2.6,3)
+    deadline_ms: Annotated[int, _last]
+    request_key: Annotated[str, _last]
+    checkpoint_hits: Annotated[List[str], _last]
+    retry_policy: Annotated[Dict[str,int], _last]
+    node_latencies: Annotated[Dict[str,int], _last]
+    circuit_breaker_state: Annotated[str, _last]  # closed|open|half_open
+    degraded: Annotated[bool, _last]
+    error_type: Annotated[Optional[str], _last]  # transient|permanent|None
+    error_code: Annotated[Optional[str], _last]  # e.g. crs_mismatch, coreg_ssim_below_threshold
+    # test injection (§4) — not in production, used by synthetic harness
+    _test_inject: Annotated[Optional[Dict[str, Any]], _last]
 
 def new_state(session_id: str, query: str, assets: List[Dict[str,Any]] | None = None, image_ids: List[str] | None = None, user_id: str | None = None) -> GraphState:
     return GraphState(
@@ -93,6 +105,16 @@ def new_state(session_id: str, query: str, assets: List[Dict[str,Any]] | None = 
         sub_queries=None,
         spatial_aggregation=None,
         query_analysis=None,
+        deadline_ms=0,
+        request_key="",
+        checkpoint_hits=[],
+        retry_policy={"max_transient": 2, "max_confidence": 3, "max_coreg": 2},
+        node_latencies={},
+        circuit_breaker_state="closed",
+        degraded=False,
+        error_type=None,
+        error_code=None,
+        _test_inject=None,
     )
 
 def add_trace(state: GraphState, agent: str, status: str, detail: Dict[str,Any] | None = None, latency_ms: int | None = None):

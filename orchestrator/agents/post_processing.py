@@ -1,12 +1,14 @@
-"""Agent 12: Post-Processing — confidence gate + stitching + data-driven chart + stitch + validation."""
+"""Agent 12: Post-Processing — confidence gate + stitching + data-driven chart (§2.4/§2.7)."""
 from __future__ import annotations
 import time
 from orchestrator.models.graph_state import GraphState, add_trace
 from orchestrator.helpers.chart_spec import build_change_by_sector_chart, build_fusion_chart, validate_chart_spec, build_chart_from_task_output
 from orchestrator.dummy.dummy_task_agents import vqa_chart, fusion_chart
+from orchestrator.core.structured_logging import log_node
+from orchestrator.core.metrics import record_node_latency
 
 CONF_THRESH = 0.6
-MAX_RETRIES = 3
+MAX_RETRIES = 3  # audit: keep 3 for confidence (probabilistic), 2 for infra errors
 
 def post_processing_node(state: GraphState) -> GraphState:
     t0 = time.time()
@@ -18,16 +20,26 @@ def post_processing_node(state: GraphState) -> GraphState:
         per = task_output.get("per_modality_confidence",{})
         conf = per.get("fused", conf)
 
-    # confidence gate
+    # confidence gate — bounded retry 3 for low confidence (§2.4)
+    policy = state.get("retry_policy") or {"max_confidence": 3}
+    max_conf = policy.get("max_confidence", MAX_RETRIES) if isinstance(policy, dict) else MAX_RETRIES
     retries = state.get("retry_count", 0)
-    if conf < CONF_THRESH and retries < MAX_RETRIES:
+    rk = state.get("request_key") or ""
+    if conf < CONF_THRESH and retries < max_conf:
         state["retry_count"] = retries + 1
-        add_trace(state, "post_processing", "retry", {"confidence": conf, "threshold": CONF_THRESH, "retry": retries+1}, latency_ms=int((time.time()-t0)*1000))
-        # signal to graph to retry task agent — we set flag
+        state["error_type"] = "transient"
+        state["error_code"] = "low_confidence"
+        lat = int((time.time()-t0)*1000)
+        state.setdefault("node_latencies", {})["post_processing"] = lat  # type: ignore
+        add_trace(state, "post_processing", "retry", {"confidence": conf, "threshold": CONF_THRESH, "retry": retries+1, "max_confidence": max_conf}, latency_ms=lat)
+        log_node("post_processing", rk, "retry", lat, "transient", {"confidence": conf, "retry": retries+1})
+        record_node_latency("post_processing", lat, "transient")
         state["_needs_retry"] = True  # type: ignore
         return state
 
     state["_needs_retry"] = False  # type: ignore
+    state["error_type"] = None if conf >= CONF_THRESH else "permanent"
+    state["error_code"] = None if conf >= CONF_THRESH else "low_confidence_permanent"
     # chart spec generation — data-driven first, fallback to hardcoded
     chart = None
     try:
@@ -102,5 +114,9 @@ def post_processing_node(state: GraphState) -> GraphState:
     # persist to PostgreSQL + MinIO is handled in api/main.py run_pipeline; here just state
     state["final_result"] = final
     state["confidence"] = final["confidence"]
-    add_trace(state, "post_processing", "ok", {"confidence": final["confidence"], "has_chart": chart is not None, "stitched": True}, latency_ms=int((time.time()-t0)*1000))
+    lat = int((time.time()-t0)*1000)
+    state.setdefault("node_latencies", {})["post_processing"] = lat  # type: ignore
+    add_trace(state, "post_processing", "ok", {"confidence": final["confidence"], "has_chart": chart is not None, "stitched": True, "request_key": rk}, latency_ms=lat)
+    log_node("post_processing", rk, "ok", lat, None, {"confidence": final["confidence"]})
+    record_node_latency("post_processing", lat)
     return state

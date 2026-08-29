@@ -75,20 +75,30 @@ services:
       - ./orchestrator/storage:/app/orchestrator/storage
 
   gateway:
-    build: ./gateway
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
     ports:
       - "4000:4000"
     environment:
       PORT: 4000
       ORCHESTRATOR_URL: http://orchestrator:8000
       JWT_SECRET: change-me
+      ANALYSIS_PROVIDER: agentic
+      CORS_ORIGIN: http://localhost:3000,http://localhost:5173
     depends_on:
       - orchestrator
 
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE: http://localhost:4000
     ports:
       - "3000:3000"
+    environment:
+      VITE_API_BASE: http://localhost:4000
     depends_on:
       - gateway
 

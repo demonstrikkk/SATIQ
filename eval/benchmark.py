@@ -84,18 +84,35 @@ def _compute_metrics(dataset: Dataset, results: List[Dict[str, Any]]) -> Dict[st
         return {"category_f1": f1, "magnitude_mae": magnitude_mae, "num_samples": len(results)}
     return {"num_samples": len(results)}
 
+BENCHMARK_OVERRIDES = {
+    "circuit_breaker_enabled": False,
+    "deadline_ms": 60000,
+    "max_retries": 0,  # fail fast, record failure, move to next sample
+}
+
 async def run_benchmark(dataset: Dataset, split: str = "val", limit: int = 20) -> Dict[str, Any]:
     """Run pipeline on each sample, compute metrics. Async for Celery/SSE."""
     samples = _load_dataset_samples(dataset, split, limit)
     results: List[Dict[str, Any]] = []
     # import pipeline lazily to avoid circular
+    # benchmark mode: disable circuit breaker, high deadline (§2.5 audit #10)
+    _cb_states = {}
+    try:
+        from orchestrator.core import circuit_breaker as _cb
+        # save and reset
+        for name, cir in [("qwen", _cb.qwen_circuit), ("vision", _cb.vision_circuit), ("fusion", _cb.fusion_circuit)]:
+            _cb_states[name] = cir.state
+            cir.reset()
+            # raise threshold so batch low-confidence does not trip
+            cir.failure_threshold = 999
+    except Exception:
+        pass
     try:
         from orchestrator.models.graph_state import new_state
         from orchestrator.graph.pipeline import get_pipeline
         import asyncio
         pipe = get_pipeline()
         for s in samples:
-            # build state per sample
             query = s.get("query","")
             if dataset == "cdvqa":
                 assets = [{"asset_id": s["image_t1_id"], "crs":"EPSG:32617"}, {"asset_id": s["image_t2_id"], "crs":"EPSG:32617"}]
@@ -104,15 +121,27 @@ async def run_benchmark(dataset: Dataset, split: str = "val", limit: int = 20) -
                 assets = [{"asset_id": s["image_id"], "crs":"EPSG:32617"}]
                 ids = [s["image_id"]]
             state = new_state(session_id=f"bench_{s['id']}", query=query, assets=assets, image_ids=ids)
+            # benchmark overrides: high deadline, no retries (fail fast)
+            import time as _t
+            state["deadline_ms"] = int(_t.time()*1000) + BENCHMARK_OVERRIDES["deadline_ms"]  # type: ignore
+            state["retry_policy"] = {"max_transient": 0, "max_confidence": 0, "max_coreg": 0}  # type: ignore
             out = await pipe.ainvoke(state)  # type: ignore
             final = out.get("final_result") or out.get("task_output") or {}
             results.append({"sample_id": s["id"], "prediction": final, "ground_truth": s.get("ground_truth"), "task_output": final})
             await asyncio.sleep(0.01)
     except Exception as e:
-        # fallback dummy results
-        for s in samples:
+        for s in samples[len(results):]:
             results.append({"sample_id": s["id"], "prediction": {"answer_text":"dummy"}, "ground_truth": s.get("ground_truth")})
         results.append({"_error": str(e)[:200]})
+    finally:
+        try:
+            from orchestrator.core import circuit_breaker as _cb2
+            for name, cir in [("qwen", _cb2.qwen_circuit), ("vision", _cb2.vision_circuit), ("fusion", _cb2.fusion_circuit)]:
+                if name in _cb_states:
+                    cir.failure_threshold = 5
+                    cir.reset()
+        except Exception:
+            pass
     metrics = _compute_metrics(dataset, results)
     return {"dataset": dataset, "split": split, "metrics": metrics, "results": results[:5]}
 
@@ -122,6 +151,15 @@ async def run_benchmark_stream(dataset: Dataset, split: str = "val", limit: int 
     total = len(samples)
     yield {"event": "benchmark_started", "dataset": dataset, "split": split, "total": total}
     results: List[Dict[str, Any]] = []
+    _cb_states2 = {}
+    try:
+        from orchestrator.core import circuit_breaker as _cb
+        for name, cir in [("qwen", _cb.qwen_circuit), ("vision", _cb.vision_circuit), ("fusion", _cb.fusion_circuit)]:
+            _cb_states2[name] = cir.state
+            cir.reset()
+            cir.failure_threshold = 999
+    except Exception:
+        pass
     try:
         from orchestrator.models.graph_state import new_state
         from orchestrator.graph.pipeline import get_pipeline
@@ -136,6 +174,9 @@ async def run_benchmark_stream(dataset: Dataset, split: str = "val", limit: int 
                 assets = [{"asset_id": s["image_id"], "crs":"EPSG:32617"}]
                 ids = [s["image_id"]]
             state = new_state(session_id=f"bench_{s['id']}", query=query, assets=assets, image_ids=ids)
+            import time as _t2
+            state["deadline_ms"] = int(_t2.time()*1000) + BENCHMARK_OVERRIDES["deadline_ms"]  # type: ignore
+            state["retry_policy"] = {"max_transient": 0, "max_confidence": 0, "max_coreg": 0}  # type: ignore
             out = await pipe.ainvoke(state)  # type: ignore
             final = out.get("final_result") or {}
             results.append({"sample_id": s["id"], "prediction": final})
@@ -143,6 +184,15 @@ async def run_benchmark_stream(dataset: Dataset, split: str = "val", limit: int 
             await asyncio.sleep(0.01)
     except Exception as e:
         yield {"event": "error", "message": str(e)[:300]}
+    finally:
+        try:
+            from orchestrator.core import circuit_breaker as _cb3
+            for name, cir in [("qwen", _cb3.qwen_circuit), ("vision", _cb3.vision_circuit), ("fusion", _cb3.fusion_circuit)]:
+                if name in _cb_states2:
+                    cir.failure_threshold = 5
+                    cir.reset()
+        except Exception:
+            pass
     metrics = _compute_metrics(dataset, results)
     yield {"event": "benchmark_done", "metrics": metrics}
 

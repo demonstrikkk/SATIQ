@@ -25,6 +25,12 @@ from orchestrator.core.config import get_settings
 from orchestrator.db.session import init_db
 from orchestrator.helpers.chart_spec import validate_chart_spec
 from orchestrator.services.conversation import save_history
+from orchestrator.core.queue_gate import acquire as queue_acquire, release as queue_release, active_count as queue_active_count, get_limits as queue_limits
+from orchestrator.core.circuit_breaker import qwen_circuit, vision_circuit, fusion_circuit
+from orchestrator.core.metrics import snapshot as metrics_snapshot, record_request
+from orchestrator.core.structured_logging import log_node as structured_log_node
+from orchestrator.services.vision_encoder_service import health_live as vision_health_live, health_ready as vision_health_ready
+from orchestrator.services.fusion_llm_service import health_live as fusion_health_live, health_ready as fusion_health_ready
 
 app = FastAPI(title="Satiq Orchestrator", version="1.0.0")
 
@@ -110,8 +116,11 @@ def _status_from_event(event: str, cur: str) -> str:
     return cur or "running"
 
 async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]], image_ids: List[str]):
+    acquired = True  # we already acquired in endpoint; if direct call, try acquire
+    # if not already counted (burst test may call directly), ensure acquire
+    # For background task path, endpoint already acquired — don't double-acquire; track via session flag
+    is_direct = EXECUTIONS.get(session_id, {}).get("_queued") != True if session_id in EXECUTIONS else True
     try:
-        # resolve active LLM provider for audit trace
         try:
             _prov = resolve_provider()
             _s = get_settings()
@@ -214,6 +223,27 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
     except Exception as e:
         await _broadcast(session_id, "error", {"message": str(e)})
         EXECUTIONS[session_id]["error"] = str(e)
+        try:
+            record_request(False)
+        except Exception:
+            pass
+    finally:
+        # release queue slot if we were the holder
+        try:
+            # release only if session was queued via gate
+            if EXECUTIONS.get(session_id, {}).get("_queued"):
+                queue_release()
+                EXECUTIONS[session_id]["_queued"] = False
+        except Exception:
+            pass
+        # also mark metrics success if final_result present
+        try:
+            res = EXECUTIONS.get(session_id, {}).get("result")
+            has_result = bool(res and not res.get("error"))
+            if "error" not in (EXECUTIONS.get(session_id) or {}):
+                record_request(has_result)
+        except Exception:
+            pass
 
 @app.on_event("startup")
 async def startup():
@@ -229,6 +259,42 @@ async def startup():
 @app.get("/health")
 async def health():
     return {"status":"healthy","timestamp": time.time(), "uptime": time.time()}
+
+@app.get("/health/live")
+async def health_live():
+    return {"status":"healthy","service":"orchestrator","timestamp": time.time(), "queue": {"active": queue_active_count(), "limits": queue_limits()}}
+
+@app.get("/health/ready")
+async def health_ready():
+    # readiness: model is warm if circuit closed and at least one provider available
+    qwen = qwen_circuit.snapshot()
+    vision = vision_health_ready()
+    fusion = fusion_health_ready()
+    ready = qwen["state"] != "open" and vision.get("http_status")==200 and fusion.get("http_status")==200
+    status_code = 200 if ready else 503
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=status_code, content={
+        "status": "ready" if ready else "not_ready",
+        "timestamp": time.time(),
+        "qwen": qwen,
+        "vision": vision,
+        "fusion": fusion,
+        "queue": {"active": queue_active_count(), "limits": queue_limits()},
+    })
+
+@app.get("/api/v1/metrics")
+async def metrics_endpoint():
+    return metrics_snapshot()
+
+@app.get("/api/v1/task/{session_id}/health")
+async def task_health(session_id: str):
+    # per-request health: node latencies + trace summary
+    exec_ = EXECUTIONS.get(session_id)
+    if not exec_:
+        raise HTTPException(status_code=404, detail="session not found")
+    result = exec_.get("result") or {}
+    trace = result.get("execution_trace") or []
+    return {"session_id": session_id, "metrics": metrics_snapshot(), "trace": trace_summary(trace)}
 
 @app.get("/api/v1/llm/status")
 async def llm_status():
@@ -307,6 +373,8 @@ async def create_task_with_audio(
         crs_vals = [a.get("crs") for a in assets_n if a.get("crs")]
         if len(set(crs_vals)) > 1:
             raise HTTPException(status_code=400, detail=f"CRS mismatch: {crs_vals}")
+    if not queue_acquire():
+        raise HTTPException(status_code=429, detail=f"queue full: active={queue_active_count()} limits={queue_limits()}")
     session_id = f"sess_{uuid.uuid4().hex[:8]}"
     EXECUTIONS[session_id] = {
         "session_id": session_id,
@@ -318,6 +386,7 @@ async def create_task_with_audio(
         "events": [],
         "result": None,
         "transcription": transp,
+        "_queued": True,
     }
     background_tasks.add_task(run_pipeline, session_id, final_query.strip(), assets_n, ids_n)
     return {"session_id": session_id, "status": "queued", "query": final_query, "transcription": transp}
@@ -329,12 +398,13 @@ async def create_task(req: TaskRequest, background_tasks: BackgroundTasks):
     if len(req.query) > 4000:
         raise HTTPException(status_code=400, detail="query exceeds 4000 chars")
     assets, image_ids = _normalize_assets(req)
-    # quick CRS gate before enqueue
     if assets:
         crs_vals = [a.get("crs") for a in assets if a.get("crs")]
         if len(set(crs_vals)) > 1:
             raise HTTPException(status_code=400, detail=f"CRS mismatch: {crs_vals}")
-
+    # queue gate with backpressure (§2.2 audit #5)
+    if not queue_acquire():
+        raise HTTPException(status_code=429, detail=f"queue full: active={queue_active_count()} limits={queue_limits()}")
     session_id = req.session_id or f"sess_{uuid.uuid4().hex[:8]}"
     EXECUTIONS[session_id] = {
         "session_id": session_id,
@@ -345,10 +415,9 @@ async def create_task(req: TaskRequest, background_tasks: BackgroundTasks):
         "created_at": time.time(),
         "events": [],
         "result": None,
+        "_queued": True,
     }
-    # run in background
     background_tasks.add_task(run_pipeline, session_id, req.query.strip(), assets, image_ids)
-    # also allow direct await for tests? For now background
     return {"session_id": session_id, "status": "queued"}
 
 @app.get("/api/v1/task/{session_id}")

@@ -55,6 +55,8 @@
 | T-077 | Data-driven charts + GeoJSON + Report | M5 | **Done** | OpenCode | wip | `helpers/chart_spec.py:104` `build_chart_from_task_output` + `services/geojson_export.py` + `services/report_generator.py` |
 | T-078 | Followup suggestions + confidence explanation + recompose | M5 | **Done** | OpenCode | wip | `agents/response_composer.py:1` 3 suggestions, explanation, `POST /task/{id}/recompose` |
 | T-079 | Observability trace summary + benchmark | M5 | **Done** | OpenCode | wip | `helpers/trace.py` bottleneck + `GET /session/{sid}/trace/summary` |
+| T-080 | Pipeline resilience (timeout, retry, circuit breaker, checkpoint, queue, TTL cache) | M5 | **Done** | OpenCode | wip | ADR 0005; `core/*` + `services/*` + `tests/` 10 cases 13 passed 1 skipped |
+| T-081 | Full integration frontend↔gateway↔orchestrator (agentic, mock LLM, Docker) | M6 | **Done** | OpenCode | wip | ADR 0006; `gateway` agentic provider, `frontend` analysisClient, `docker-compose` |
 
 **Statuses:** `Todo` → `In Progress` → `In Review` → `Done` · Mark `Blocked` if waiting on external (checkpoint, dataset).
 
@@ -96,6 +98,10 @@
 | 2026-08-29 | T-075 | Spectral `ndvi/ndwi/ndbi/evi` dummy trace + band check | PASS — `preprocessing` trace `spectral:{ndvi_mean:0.42...}` for change/fusion; `encoder_compat` `band_reports` with `Cartosat no NIR` warning | wip |
 | 2026-08-29 | T-076 | GeoJSON `GET /task/{sid}/geojson` + Report `POST /session/{sid}/report` + Recompose `POST /task/{sid}/recompose` | PASS — grounding GeoJSON `FeatureCollection 1 feat`; report html 1488B; recompose v2 `followup_suggestions[0]=What is area in ha?` | wip |
 | 2026-08-29 | T-077 | Trace summary `GET /session/{sid}/trace/summary` + Benchmark `POST /benchmark` vrsbench | PASS — `total_ms:66, slowest:planner, breakdown`; benchmark `accuracy:0.0 count_mae:0.26 num:2` | wip |
+| 2026-08-29 | T-080 | `pytest tests -q` resilience | PASS — `13 passed, 1 skipped` (happy, permanent, transient, idempotency, backpressure 429, circuit breaker) 77s | wip |
+| 2026-08-29 | T-080 | `GET /health/live` + `/health/ready` | PASS — `{"status":"ready","qwen":"closed","vision":"ready","fusion":"ready","queue":0}` | wip |
+| 2026-08-29 | T-081 | `gateway npm run typecheck` + `frontend npm run build` | PASS — gateway `tsc --noEmit` (no errors), frontend `tsc && vite build` 2559 modules | wip |
+| 2026-08-29 | T-081 | Manual gateway agentic `POST /api/query` via `ANALYSIS_PROVIDER=agentic` | PASS — `POST http://127.0.0.1:4000/api/query` → `{"execution_id":"exec_*","status":"running"}` + stream | wip |
 
 *Paste real command output in PRs — "tests pass" without evidence is not accepted (see `AGENTS.md:5`).*
 

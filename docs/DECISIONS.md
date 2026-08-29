@@ -19,7 +19,9 @@
 | 2026-08-28 | [ADR 0002](adr/0002-api-gateway.md) | Implement API gateway and rate limiter | gateway | `<fill>` | Accepted |
 | 2026-08-28 | [ADR 0003](adr/0003-frontend-workstation.md) | Build Satiq frontend analysis workstation (Phases 0-12) | frontend | `wip` | Accepted |
 | 2026-08-28 | — | Redesign primary chat as product-specific conversational operating surface (seed, semantic messages, inline activity, context-aware composer) | frontend | `wip` | Logged |
-| 2026-08-29 | [ADR 0004](adr/0004-orchestrator-pipeline.md) | Orchestrator LangGraph RS-VLM pipeline with dummy vision & mocked Qwen 3.5 9B | orchestrator | `wip` | Accepted |
+| 2026-08-29 | [ADR 0004](adr/0004-orchestrator-pipeline.md) | Orchestrator LangGraph RS-VLM pipeline with dummy vision & mocked Qwen 3.5 9B | orchestrator | `f3a70b8` | Accepted |
+| 2026-08-29 | [ADR 0005](adr/0005-resilience-optimization.md) | Pipeline resilience & performance (timeout, retry, circuit breaker, checkpoint, queue, TTL cache) | orchestrator | `wip` | Accepted |
+| 2026-08-29 | [ADR 0006](adr/0006-full-integration.md) | Full system integration frontend↔gateway↔orchestrator (agentic bridge, mock LLM, Docker) | repo | `wip` | Accepted |
 
 <!-- New entries append below. Keep newest at bottom for git-friendly diffs. -->
 
@@ -73,3 +75,15 @@
   * Qwen mocked explicitly: `MOCK_QWEN=true` in `.env` + `config.mock_qwen`; when true, `llm_client` never creates OpenAI client or hits network, returns deterministic `_mock:true, _mode:mock_qwen_3.5_9b` and `Mocked Qwen 3.5 9B composer` suffix; swappable to real Ollama by flipping flag + pulling `qwen3:8b`.
 * **Why:** Prompt requires entire RS-VLM pipeline today with only Qwen real; all vision dummies swappable. Must not create duplicate `rs-vlm/app` scaffold — reuse. Need deterministic safety gates, auditable trace, retry policies, graph visualization, and offline-operable infra (SQLite/Redis/MinIO/Celery all have local fallbacks). User explicitly: don't download Qwen now → mock, keep $ wiring.
 * **Consequences:** `TestClient POST /api/v1/task` works for all 5 inputs: vqa→0.87, grounding→bbox [120,45,310,210], change→`built-up_increase`, fusion→`{optical 0.82 sar 0.76 fused 0.9}`; CRS mismatch →400 before LLM; `execution_trace` has 13 agents; `orchestrator/graph/graph.png` generated; `docker compose config` valid; `orchestrator/tests` PASS. Real vision/GDAL and real Qwen are deferred but isolated to `dummy/` + flag flip — no graph change needed.
+
+### 2026-08-29 — Resilience & Optimization
+
+* **What:** Implemented `docs/satquery-ai-resilience-optimization.md` §2.1–2.9 with 10 audit fixes: `GraphState` deadline/request_key/checkpoint/retry_policy/node_latencies/degraded/_test_inject, `core/timeouts` budgets, `core/checkpoint` sorted-hash request_key, `core/circuit_breaker` single `qwen_circuit` at `llm_client.resolve_provider`, `core/queue_gate` semaphore 429, `core/ttl_cache` tile/encoder, `services/vision_encoder_service` + `fusion_llm_service` with `health_live`/`health_ready`, `core/metrics` + `structured_logging`, `eval/benchmark` `BENCHMARK_OVERRIDES`, `tests/` 10 synthetic cases with `conftest` resets.
+* **Why:** Pipeline had no retry cap, no breaker, no deadline, no service split — spec required fault tolerance without redesign.
+* **Consequences:** `pytest tests -q` 13 passed 1 skipped; `request_key` checkpoint reuse, `retry_count` 1 for flaky, `429` backpressure, `health/ready` 503 when circuit open.
+
+### 2026-08-29 — Full Integration
+
+* **What:** Wired `frontend (5173) → gateway (4000) → orchestrator (8000)` agentic path with mocked LLM (no Groq): `gateway` `AgenticAnalysisProvider` POST `/api/query` → `POST /api/v1/task` + SSE poll, `ANALYSIS_PROVIDER=agentic`, `orchestrator` `MOCK_QWEN=true LLM_PROVIDER=mock`, `gateway/frontend` Dockerfiles with `shared/` copy and `context: .`, `frontend` `analysisClient.ts` auto-login `demo/demo` → `localStorage satiq_token`, `applyEvent.ts` store bridge, `Composer` tries real then fallback to mock, `execution.ts` add `cancelled`, `docker-compose` `VITE_API_BASE=http://localhost:4000`.
+* **Why:** User requested complete product ready without Groq calls; gateway was mock-only, frontend was mock-only; needed real SSE integration for demo.
+* **Consequences:** `gateway npm run typecheck` pass, `frontend npm run build` pass, `POST /api/query` via gateway returns `exec_*` and streams real pipeline events (verified via `Invoke-RestMethod`); offline demo works.

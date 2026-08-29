@@ -18,6 +18,14 @@ except Exception:
     OpenAI = None  # type: ignore
 
 from .config import get_settings
+try:
+    from orchestrator.core.circuit_breaker import qwen_circuit  # type: ignore
+except Exception:
+    qwen_circuit = None  # type: ignore
+try:
+    from orchestrator.core.metrics import record_node_latency  # type: ignore
+except Exception:
+    record_node_latency = None  # type: ignore
 
 # ---------- capability check for local Qwen ----------
 
@@ -85,15 +93,16 @@ def is_mock_mode() -> bool:
     return False
 
 def resolve_provider() -> Provider:
+    # circuit breaker gate (§2.5 audit fix: at llm_client level)
+    try:
+        if qwen_circuit is not None and qwen_circuit.is_open():
+            return "mock"
+    except Exception:
+        pass
     s = get_settings()
     prov = (getattr(s, "llm_provider", "auto") or "auto").lower()
     if prov == "mock" or is_mock_mode():
-        # if explicit mock, keep mock; but auto would still try groq/local first unless MOCK_QWEN forced
-        # For backward compat, MOCK_QWEN=true forces mock even in auto
         if is_mock_mode() and prov == "auto":
-            # still allow groq if user set GROQ_API_KEY and no local capability?
-            # New behavior: if MOCK_QWEN=true, respect it as force mock (user said mock qwen for now)
-            # But new requirement says auto switch local→groq; so if MOCK_QWEN=true we stay mock
             return "mock"
         if prov == "mock":
             return "mock"
@@ -101,7 +110,6 @@ def resolve_provider() -> Provider:
         return "local" if has_local_qwen_capability() else "mock"
     if prov == "groq":
         return "groq" if s.groq_api_key else "mock"
-    # auto
     if is_mock_mode():
         return "mock"
     if has_local_qwen_capability():
@@ -283,19 +291,23 @@ Answer with one word only."""
                 max_tokens=10,
             )
             content = _strip_think(resp.choices[0].message.content or "")
-            # extract single word
             import re as _re
             m = _re.search(r"\b(vqa|grounding|change_vqa|optical_sar_fusion)\b", content.lower())
+            if qwen_circuit is not None:
+                try: qwen_circuit.record_success()
+                except Exception: pass
             if m:
                 tt = m.group(1)
                 return {"task_type": tt, "reasoning": f"Groq qwen {model} single-word", "confidence": 0.90, "_provider": "groq", "_model": model}
-            # fallback to dummy if no word found
             base = _dummy_router(query, assets)
             base["_provider"] = "groq"
             base["_fallback"] = "no_word_found"
             return base
         except Exception as e:
             print(f"[qwen router fallback groq fast] {e}")
+            if qwen_circuit is not None:
+                try: qwen_circuit.record_failure()
+                except Exception: pass
             base = _dummy_router(query, assets)
             base["_mock"] = True
             base["_fallback"] = str(e)[:120]
@@ -317,6 +329,9 @@ Return JSON only, no <think>, no markdown, no explanation: {{"task_type": "...",
             response_format={"type":"json_object"},  # type: ignore
         )
         raw = resp.choices[0].message.content or ""
+        if qwen_circuit is not None:
+            try: qwen_circuit.record_success()
+            except Exception: pass
         jstr = _extract_json(raw)
         if jstr:
             try:
@@ -339,6 +354,9 @@ Return JSON only, no <think>, no markdown, no explanation: {{"task_type": "...",
         return base
     except Exception as e:
         print(f"[qwen router fallback {actual_prov}] {e}")
+        if qwen_circuit is not None:
+            try: qwen_circuit.record_failure()
+            except Exception: pass
         base = _dummy_router(query, assets)
         base["_mock"] = True
         base["_fallback"] = str(e)[:120]
@@ -377,6 +395,9 @@ Return JSON only with keys: task_type, reasoning, required_assets (list), fusion
             resp_kwargs["response_format"] = {"type":"json_object"}  # type: ignore
         resp = cli.chat.completions.create(**resp_kwargs)  # type: ignore
         raw = resp.choices[0].message.content or ""
+        if qwen_circuit is not None:
+            try: qwen_circuit.record_success()
+            except Exception: pass
         jstr = _extract_json(raw)
         if jstr:
             try:
@@ -401,17 +422,21 @@ Return JSON only with keys: task_type, reasoning, required_assets (list), fusion
         return out
     except Exception as e:
         print(f"[qwen planner fallback {actual_prov}] {e}")
+        if qwen_circuit is not None:
+            try: qwen_circuit.record_failure()
+            except Exception: pass
         out = _dummy_planner(query, task_type)
         out["_mock"] = True
         out["_fallback"] = str(e)[:120]
         out["_provider"] = "mock"
         return out
 
-def call_qwen_composer(query: str, task_output: Dict[str,Any], trace: list) -> str:
+def call_qwen_composer(query: str, task_output: Dict[str,Any], trace: list) -> str:  # noqa: C901
     prov = resolve_provider()
     if prov == "mock":
         base = task_output.get("answer_text","")
-        return base + f"\n\n> Confidence: {task_output.get('confidence', task_output.get('per_modality_confidence',{}).get('fused',0.82))} • Mocked Qwen 3.5 9B composer (offline heuristic) — replace with Ollama/Groq when enabled"
+        suffix = " • circuit open — degraded mode (mock)" if (qwen_circuit is not None and qwen_circuit.is_open()) else " • Mocked Qwen 3.5 9B composer (offline heuristic) — replace with Ollama/Groq when enabled"
+        return base + f"\n\n> Confidence: {task_output.get('confidence', task_output.get('per_modality_confidence',{}).get('fused',0.82))}{suffix}"
     s = get_settings()
     prompt = f"""You are Satiq's response composer. Fuse tool outputs into final answer.
 Query: {query}
@@ -420,6 +445,9 @@ Trace: {json.dumps(trace)[-800:]}
 Write concise markdown answer with > confidence, bbox if present, and evidence summary. Keep under 400 words."""
     cli, actual_prov = get_sync_client()
     if cli is None:
+        if qwen_circuit is not None:
+            try: qwen_circuit.record_failure()
+            except Exception: pass
         return task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Composed locally (Qwen offline)"
     model = s.qwen_model if actual_prov == "local" else _groq_model_name()
     try:
@@ -429,7 +457,13 @@ Write concise markdown answer with > confidence, bbox if present, and evidence s
             temperature=0.2,
             max_tokens=600,
         )
+        if qwen_circuit is not None:
+            try: qwen_circuit.record_success()
+            except Exception: pass
         return resp.choices[0].message.content or task_output.get("answer_text","")
     except Exception as e:
         print(f"[qwen composer fallback {actual_prov}] {e}")
+        if qwen_circuit is not None:
+            try: qwen_circuit.record_failure()
+            except Exception: pass
         return task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Mocked Qwen (fallback {actual_prov})"
