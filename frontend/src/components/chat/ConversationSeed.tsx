@@ -46,19 +46,17 @@ function EarthHalf() {
         }}
       />
 
-      {/* Earth sphere — rotates circularly to convey Earth rotation */}
-      <div className="absolute left-1/2 bottom-20 -translate-x-1/2 translate-y-[72%] w-[110vw] max-w-[1260px] aspect-square">
+      {/* Earth sphere — smooth circular orbit (revolving, not spinning) — 10°/3s = 108s/orbit */}
+      <div className="absolute left-1/2 bottom-20 w-[110vw] max-w-[1260px] aspect-square" style={{ animation: "earthOrbit 108s linear infinite", willChange: "transform", transform: "translate(-50%, 72%)" }}>
         <div className="relative w-full h-full rounded-full overflow-hidden" style={{ clipPath: "circle(50%)" }}>
-          {/* Rotating earth image — 10deg per 3s = 108s/rev, elegant + visible marker to prove rotation */}
-          <div className="absolute inset-0" style={{ animation: "spin 108s linear infinite", willChange: "transform", transformOrigin: "center center" }}>
+          {/* Earth texture — static, the whole sphere orbits smoothly */}
+          <div className="absolute inset-0">
             <img
               src="https://images.unsplash.com/photo-1614730321146-b6fa6a46bcb4?w=1600&h=1600&fit=crop&crop=center"
               alt=""
               className="w-full h-full object-cover"
               style={{ filter: "brightness(0.95) saturate(1.05) contrast(1.02)" }}
             />
-            {/* rotation marker — small red dot that circles with earth, proves speed */}
-            <div className="absolute top-[44%] left-[36%] h-2.5 w-2.5 rounded-full bg-[#EF4444] border border-white/80 shadow-[0_0_10px_rgba(239,68,68,0.95),0_0_20px_rgba(239,68,68,0.5)]" />
           </div>
           {/* Atmospheric limb glow */}
           <div

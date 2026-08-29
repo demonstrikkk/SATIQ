@@ -164,3 +164,15 @@ textarea.composer-input:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   @keyframes beamSweep { 0%,100% { transform: none; opacity: 0.4; } }
 }
+
+/* ── Earth circular orbit — smooth revolving, not spinning ─────────────── */
+@keyframes earthOrbit {
+  0% { transform: translate(-50%, 72%) translateX(0px) translateY(0px); }
+  25% { transform: translate(-50%, 72%) translateX(14px) translateY(-7px); }
+  50% { transform: translate(-50%, 72%) translateX(0px) translateY(-12px); }
+  75% { transform: translate(-50%, 72%) translateX(-14px) translateY(-7px); }
+  100% { transform: translate(-50%, 72%) translateX(0px) translateY(0px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes earthOrbit { 0%,100% { transform: translate(-50%, 72%); } }
+}
