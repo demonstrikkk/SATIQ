@@ -67,6 +67,14 @@ class GraphState(TypedDict, total=False):
     error_code: Annotated[Optional[str], _last]  # e.g. crs_mismatch, coreg_ssim_below_threshold
     # test injection (§4) — not in production, used by synthetic harness
     _test_inject: Annotated[Optional[Dict[str, Any]], _last]
+    # Phase B — spatial memory / RAG
+    turn_history: Annotated[List[Dict[str, Any]], _last]
+    entity_registry: Annotated[Dict[str, str], _last]
+    last_spectral_indices: Annotated[Dict[str, float], _last]
+    last_change_pair: Annotated[Optional[List[str]], _last]
+    coreference_map: Annotated[Dict[str, Any], _last]
+    last_crop_path: Annotated[Optional[str], _last]
+    tmp_files: Annotated[List[str], _last]
 
 def new_state(session_id: str, query: str, assets: List[Dict[str,Any]] | None = None, image_ids: List[str] | None = None, user_id: str | None = None) -> GraphState:
     return GraphState(
@@ -115,6 +123,13 @@ def new_state(session_id: str, query: str, assets: List[Dict[str,Any]] | None = 
         error_type=None,
         error_code=None,
         _test_inject=None,
+        turn_history=[],
+        entity_registry={},
+        last_spectral_indices={},
+        last_change_pair=None,
+        coreference_map={},
+        last_crop_path=None,
+        tmp_files=[],
     )
 
 def add_trace(state: GraphState, agent: str, status: str, detail: Dict[str,Any] | None = None, latency_ms: int | None = None):

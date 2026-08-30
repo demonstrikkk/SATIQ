@@ -1,16 +1,20 @@
 """Agent 13: Error Handler — bounded retry with transient/permanent classification (§2.4)."""
 from __future__ import annotations
+import asyncio
+import json
 import time
+from datetime import datetime, timezone
 from orchestrator.models.graph_state import GraphState, add_trace
 from orchestrator.core.errors import classify_error_code, classify_exception
 from orchestrator.core.structured_logging import log_node
 from orchestrator.core.metrics import record_node_latency
+from orchestrator.core.dlq import push as dlq_push
 
 # audit fix: keep 3 for confidence, 2 for infra errors — document explicitly
 MAX_TRANSIENT_RETRIES = 2
 MAX_CONFIDENCE_RETRIES = 3
 
-def error_handler_node(state: GraphState) -> GraphState:
+async def error_handler_node(state: GraphState) -> GraphState:
     t0 = time.time()
     rk = state.get("request_key") or ""
     err = state.get("error") or "unknown error"
@@ -19,37 +23,51 @@ def error_handler_node(state: GraphState) -> GraphState:
     error_type = state.get("error_type")
     # classify if not already set
     if not error_type:
-        # try code, else exception heuristic
         error_type = classify_error_code(error_code or "")
         state["error_type"] = error_type  # type: ignore
     if not error_code:
         error_code = "unknown"
         state["error_code"] = error_code  # type: ignore
-    # retry policy from state
     policy = state.get("retry_policy") or {"max_transient": 2, "max_confidence": 3, "max_coreg": 2}
     max_transient = policy.get("max_transient", 2) if isinstance(policy, dict) else 2
     max_conf = policy.get("max_confidence", 3) if isinstance(policy, dict) else 3
     retries = state.get("retry_count", 0)
     coreg_retries = state.get("coreg_retries", 0)
-    # exponential backoff hint (no real sleep in graph — api layer handles, here just log)
     backoff_ms = 0
     if error_type == "transient":
         if error_code == "coreg_retryable":
-            backoff_ms = 0  # coreg retry already via pipeline edge
+            backoff_ms = 0
         elif "confidence" in (error_code or ""):
             if retries < max_conf:
                 backoff_ms = 200 * (2 ** retries)
         else:
             if retries < max_transient:
                 backoff_ms = 200 * (2 ** retries)
-                # mark for potential retry if caller supports it
                 state["_needs_retry"] = True  # type: ignore
                 state["retry_count"] = retries + 1
             else:
                 state["_needs_retry"] = False  # type: ignore
     else:
-        # permanent — never retry
         state["_needs_retry"] = False  # type: ignore
+    # Note: real sleep is handled by pipeline retry loop (after_vision/after_fusion) via
+    # asyncio.sleep(backoff_ms/1000) there, not here, to keep error_handler fast for tests.
+    # The backoff_ms value is used by the caller to sleep before re-entering the node.
+    # DLQ emit when permanently failed or transient retries exhausted
+    is_exhausted = (error_type == "permanent") or (error_type == "transient" and not state.get("_needs_retry"))
+    if is_exhausted:
+        try:
+            dlq_push(state.get("session_id") or rk or "unknown", {
+                "request_key": rk,
+                "error": err,
+                "error_code": error_code,
+                "error_type": error_type,
+                "task_type": state.get("task_type", "unknown"),
+                "retry_count": retries,
+                "coreg_retries": coreg_retries,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
     # ensure final_result contains structured error
     if not state.get("final_result"):
         state["final_result"] = {

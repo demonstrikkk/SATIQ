@@ -81,13 +81,15 @@ def vision_encoder_node(state: GraphState) -> GraphState:
             else:
                 raise ValueError("service unexpected shape fallback")
         except CircuitOpenError as ce:
+            # degraded fallback — continue pipeline with degraded embeddings (mirrors fusion)
             lat = int((time.time()-t0)*1000)
-            state["error"] = str(ce); state["error_type"]="transient"; state["error_code"]="circuit_open"
             state["degraded"] = True
-            state.setdefault("node_latencies", {})["vision_encoder"] = lat  # type: ignore
-            add_trace(state, "vision_encoder", "failed", {"error": "circuit_open", "encoder": encoder}, latency_ms=lat)
-            log_node("vision_encoder", rk, "failed", lat, "transient", {"circuit": True})
-            record_node_latency("vision_encoder", lat, "transient")
+            state["error"] = None; state["error_type"] = None; state["error_code"] = None
+            state["embeddings"] = {"degraded": True, "reason": "vision_cb_open", "encoder": encoder}
+            state["_embeddings_raw"] = {"degraded": True}
+            add_trace(state, "vision_encoder", "ok_degraded", {"encoder": encoder, "degraded": True, "circuit": True, "request_key": rk}, latency_ms=lat)
+            log_node("vision_encoder", rk, "ok_degraded", lat, None, {"circuit": True, "degraded": True})
+            record_node_latency("vision_encoder", lat)
             return state
         except NodeTimeoutError:
             lat = int((time.time()-t0)*1000)

@@ -115,5 +115,15 @@ class SessionState:
                 pass
         return unsub
 
+    async def heartbeat(self, session_id: str):
+        c = await self._get_client()
+        if c:
+            try:
+                await c.expire(f"satiq:session:{session_id}", 3600)
+                await c.expire(f"session:{session_id}:state", 3600)
+                await c.expire(f"satiq:ckpt:{session_id}", 3600)
+            except Exception:
+                pass
+
 # singleton
 session_state = SessionState()

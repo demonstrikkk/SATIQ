@@ -96,6 +96,21 @@ def load_history(session_id: str, n: int = 5) -> List[Dict[str, Any]]:
             pass
     return []
 
+async def _try_pgvector_retrieve(session_id: str, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    # pgvector hybrid — try Postgres, fallback to SQLite recency
+    try:
+        # Use embedding service mock in tests
+        from orchestrator.services.embedding import embed_text
+        q_emb = await embed_text(query)
+        # Try Postgres pgvector if available
+        from orchestrator.db.session import AsyncSessionLocal  # type: ignore
+        if AsyncSessionLocal is None:
+            raise ImportError
+        # For now return empty — real query would be SELECT ... ORDER BY embedding <=> q_emb
+        return []
+    except Exception:
+        return []
+
 def save_history(session_id: str, entry: Dict[str, Any]) -> None:
     MEM_HISTORY.setdefault(session_id, []).append(entry)
     # SQLite persist — primary store for chat memory

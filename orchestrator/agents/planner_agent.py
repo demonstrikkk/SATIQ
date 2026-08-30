@@ -4,9 +4,22 @@ import time
 from orchestrator.models.graph_state import GraphState, add_trace
 from orchestrator.core.llm_client import call_qwen_planner
 from orchestrator.core.events import emit
+from orchestrator.core.timeouts import check_deadline_or_raise
 
 async def planner_node(state: GraphState) -> GraphState:
     t0 = time.time()
+    try:
+        check_deadline_or_raise(state.get("deadline_ms", 0), "planner")  # type: ignore
+    except Exception as e:
+        from orchestrator.core.errors import NodeTimeoutError
+        if isinstance(e, NodeTimeoutError):
+            state["error"] = str(e)
+            state["error_type"] = "transient"
+            state["error_code"] = "node_timeout"
+            state["retry_count"] = state.get("retry_count", 0) + 1
+            add_trace(state, "planner", "failed", {"error": str(e)}, latency_ms=int((time.time()-t0)*1000))
+            return state
+        raise
     query = state.get("query","")
     task_type = state.get("task_type","vqa")
     assets = state.get("assets") or []

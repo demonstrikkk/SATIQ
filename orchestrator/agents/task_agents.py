@@ -3,8 +3,10 @@ from __future__ import annotations
 import time
 from orchestrator.models.graph_state import GraphState, add_trace
 from orchestrator.dummy.dummy_task_agents import dummy_vqa, dummy_grounding, dummy_change_vqa, dummy_optical_sar_fusion
+from orchestrator.core.timeouts import check_deadline_or_raise
 
 def task_agent_node(state: GraphState) -> GraphState:
+    check_deadline_or_raise(state.get("deadline_ms", 0), "task_agent")  # type: ignore
     t0 = time.time()
     task_type = state.get("task_type","vqa")
     query = state.get("query","")
@@ -65,7 +67,25 @@ def task_agent_node(state: GraphState) -> GraphState:
                 out = dummy_vqa(fused, query, image_id=img_001)
         state["task_output"] = out
         state["confidence"] = out.get("confidence") or out.get("per_modality_confidence", {}).get("fused") or 0.82
-        # Tile per-tile confidence already in out, also propagate to state for fusion weighting trace
+        # Phase C — FFmpeg crop for grounding: store bbox crop path for next-turn VQA
+        if task_type == "grounding" and out.get("bbox_xyxy"):
+            try:
+                # store bbox for composer image:// and for next-turn coreference
+                bbox = out["bbox_xyxy"]
+                # minimal: record crop hint without requiring real GeoTIFF (dummy path)
+                # real ffmpeg would be: crop_path = await FFmpegPreprocessor().crop_bbox_to_png(geotiff_path, bbox)
+                crop_hint = f"crop_{state.get('session_id','')}_{bbox[0]}_{bbox[1]}.png"
+                state["last_crop_path"] = f"rs-processed/{state.get('session_id','')}/crop_{bbox[0]}_{bbox[1]}.png"  # type: ignore
+                state.setdefault("tmp_files", []).append(crop_hint)  # type: ignore
+                # entity registry for coreference
+                label = out.get("detected_label") or "target"
+                state.setdefault("entity_registry", {})[f"that {label}"] = f"bbox:{bbox}"  # type: ignore
+                state.setdefault("coreference_map", {})[f"that {label}"] = f"bbox:{bbox}"  # type: ignore
+            except Exception:
+                pass
+        # Phase C — change VQA false-color hint
+        if task_type == "change_vqa" and len(image_ids) >= 2:
+            state["last_change_pair"] = [img_t1, img_t2]  # type: ignore
         add_trace(state, "task_agent", "ok", {"task": task_type, "confidence": state["confidence"], "sub_queries": len(sub_queries) if sub_queries else 0, "has_numeric": out.get("answer_numeric") is not None}, latency_ms=int((time.time()-t0)*1000))
     except Exception as e:
         state["error"] = str(e)

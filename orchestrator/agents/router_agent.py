@@ -6,9 +6,22 @@ from orchestrator.core.llm_client import call_qwen_router
 from orchestrator.core.events import emit
 from orchestrator.services.query_analyzer import detect_temporal_keywords, detect_spatial_keywords, detect_comparison_keywords
 from orchestrator.services.conversation import augment_state_with_history
+from orchestrator.core.timeouts import check_deadline_or_raise
 
 async def router_node(state: GraphState) -> GraphState:
     t0 = time.time()
+    try:
+        check_deadline_or_raise(state.get("deadline_ms", 0), "router")  # type: ignore
+    except Exception as e:
+        from orchestrator.core.errors import NodeTimeoutError
+        if isinstance(e, NodeTimeoutError):
+            state["error"] = str(e)
+            state["error_type"] = "transient"
+            state["error_code"] = "node_timeout"
+            state["retry_count"] = state.get("retry_count", 0) + 1
+            add_trace(state, "router", "failed", {"error": str(e)}, latency_ms=int((time.time()-t0)*1000))
+            return state
+        raise
     # followup + conversation history first
     try:
         state = augment_state_with_history(state)  # type: ignore

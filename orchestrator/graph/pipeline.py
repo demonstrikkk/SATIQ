@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, END
 
 from orchestrator.models.graph_state import GraphState
 from orchestrator.agents.input_validator import input_validator_node
+from orchestrator.agents.coreference_resolver import coreference_resolver_node
 from orchestrator.agents.router_agent import router_node
 from orchestrator.agents.planner_agent import planner_node
 from orchestrator.agents.encoder_selector import encoder_selector_node
@@ -96,6 +97,7 @@ def build_graph():
 
     # add nodes
     g.add_node("input_validator", input_validator_node)
+    g.add_node("coreference_resolver", coreference_resolver_node)
     g.add_node("router", router_node)
     g.add_node("planner", planner_node)
     g.add_node("encoder_selector", encoder_selector_node)
@@ -117,7 +119,8 @@ def build_graph():
     # and barrier deadlock on coreg_gate → preprocessing retry path in Pregel.
     # Intended parallel topology is documented in graph.mmd only.
     g.set_entry_point("input_validator")
-    g.add_conditional_edges("input_validator", after_validator, {"router":"router", "error_handler":"error_handler"})
+    g.add_conditional_edges("input_validator", after_validator, {"router":"coreference_resolver", "error_handler":"error_handler"})
+    g.add_edge("coreference_resolver", "router")
     g.add_edge("router", "planner")
     g.add_edge("planner", "preprocessing")
     g.add_edge("preprocessing", "encoder_selector")

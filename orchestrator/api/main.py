@@ -237,9 +237,25 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
         await _broadcast(session_id, "final_answer", {"result": final})
         await _broadcast(session_id, "query_completed", {})
 
-        # persist to minio + in-memory task_outputs
+        # persist to minio + sqlite audit + in-memory
         try:
             minio_client.upload_bytes("rs-outputs", f"{session_id}.json", json.dumps(final, indent=2).encode(), content_type="application/json")
+        except Exception:
+            pass
+        # audit trace persistence — additive Postgres/SQLite (never replaces MinIO/Redis)
+        try:
+            import sqlite3
+            from pathlib import Path
+            p = Path("orchestrator/storage/audit.db")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            con = sqlite3.connect(str(p))
+            cur = con.cursor()
+            cur.execute("CREATE TABLE IF NOT EXISTS execution_traces (request_key TEXT PRIMARY KEY, session_id TEXT, trace TEXT, created_at REAL)")
+            rk = result_state.get("request_key") or session_id
+            cur.execute("INSERT OR REPLACE INTO execution_traces (request_key, session_id, trace, created_at) VALUES (?,?,?,?)",
+                        (rk, session_id, json.dumps(trace), time.time()))
+            con.commit()
+            con.close()
         except Exception:
             pass
         EXECUTIONS[session_id]["result"] = final
@@ -314,6 +330,18 @@ async def health_ready():
 @app.get("/api/v1/metrics")
 async def metrics_endpoint():
     return metrics_snapshot()
+
+@app.get("/api/v1/dlq")
+async def list_dlq(session_id: str | None = None, limit: int = 50):
+    from orchestrator.core.dlq import list_all, list_by_session
+    try:
+        if session_id:
+            items = list_by_session(session_id, limit=limit)
+        else:
+            items = list_all(limit=limit)
+        return {"count": len(items), "items": items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)[:200])
 
 @app.get("/api/v1/task/{session_id}/health")
 async def task_health(session_id: str):

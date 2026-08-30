@@ -3,7 +3,9 @@ version: "3.9"
 # Satiq — monorepo compose (orchestrator pipeline ready)
 services:
   postgres:
-    image: postgis/postgis:15-3.4
+    image: pgvector/pgvector:pg15
+    # Note: pgvector image is Postgres 15 + vector extension; PostGIS functions
+    # are available via CREATE EXTENSION postgis after init if needed.
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

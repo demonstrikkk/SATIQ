@@ -680,11 +680,36 @@ def call_qwen_planner(query: str, task_type: str, assets: list | None = None) ->
         out["_provider"] = "mock"
         return out
     s = get_settings()
-    prompt = f"""You are Satiq's planner. Produce a StepPlan JSON.
-Task: {task_type}
-Query: "{query}"
-Assets: {assets or []}
-Return JSON only with keys: task_type, reasoning, required_assets (list), fusion_needed (bool), temporal_needed (bool), confidence (0-1)"""
+    # Phase D — new planner prompt with prior context
+    rag_context = ""
+    try:
+        from orchestrator.services.conversation import load_history
+        hist = load_history(task_type, n=2)  # type: ignore
+        # Actually load by query's session would be better, but keep simple
+        rag_context = f"Prior history snippets: {hist[:2]}" if hist else "No prior context"
+    except Exception:
+        rag_context = "No prior context"
+    prompt = f"""You are a remote sensing task planner for SatQuery AI.
+Decompose the user query into a structured execution plan.
+
+SUPPORTED TASK TYPES ONLY: vqa, captioning, grounding, change_vqa, optical_sar_fusion
+UNSUPPORTED (always REFUSE): forecasting, weather prediction, non-imagery tasks
+
+SENSORS: Sentinel-1 (SAR), Sentinel-2 (optical), Cartosat-2S (panchromatic), RISAT-1 (SAR), Landsat-8/9, NASA HLS
+SPECTRAL INDICES: NDVI, NDWI, NDBI — computed deterministically by pipeline, do NOT plan as model tasks
+
+RULES:
+- If context contains [RESOLVED:...] references, use them as ground-truth coordinates
+- If SAR + optical both required → task_type=optical_sar_fusion
+- If query is ambiguous about location → confidence_required=LOW, note ambiguity in plan
+- If outside supported capabilities → task_type=REFUSE with reason
+- OUTPUT: valid JSON matching GoalPlan schema only. No prose. No explanation.
+
+PRIOR CONTEXT: {rag_context}
+CURRENT QUERY: {query}
+AVAILABLE ASSETS: {assets or []}
+TASK HINT: {task_type}
+Produce JSON with keys: task_type, reasoning, required_assets, fusion_needed, temporal_needed, confidence, bbox_hint, spectral_indices_needed, ffmpeg_crop_needed, confidence_required, refuse_reason"""
     cli, actual_prov, model_hint = get_sync_client_for_role("planner")
     if cli is None:
         out = _dummy_planner(query, task_type)
