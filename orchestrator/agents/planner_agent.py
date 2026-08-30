@@ -23,6 +23,78 @@ async def planner_node(state: GraphState) -> GraphState:
     query = state.get("query","")
     task_type = state.get("task_type","vqa")
     assets = state.get("assets") or []
+    query_intent = state.get("query_intent") or "geospatial"  # type: ignore
+    # Also consider router's task_type as intent — LLM router now returns greeting/chitchat/help/out_of_scope directly
+    router_intent = task_type if task_type in ("greeting","chitchat","help","out_of_scope","pending_llm") else None
+    if router_intent:
+        query_intent = router_intent  # type: ignore
+    skip_hint = state.get("skip_models_hint") or False  # type: ignore
+    # ── fast path: general text / help / chitchat / greeting / out_of_scope without image → skip heavy vision ──
+    ql = query.lower()
+    has_geospatial_need = any(h in ql for h in ["detect", "find", "locate", "where", "how many", "count", "is there", "compare", "sar", "optical", "image", "scene", "bbox", "water", "forest", "building", "urban", "agricult", "crop", "field", "change", "cave", "cattle", "pasture"])
+    is_definitional = any(p in ql for p in ["what is", "what does", "what are", "define", "meaning of", "explain"])
+    has_detection_verb = any(v in ql for v in ["detect", "find", "locate", "where is", "how many", "count", "is there", "compare", "show me", "identify"])
+    definitional_skip = is_definitional and not has_detection_verb and not assets and not state.get("is_followup")
+    # Unified skip: any non-geospatial intent should skip vision
+    is_non_geospatial = query_intent in ("greeting","chitchat","help","out_of_scope","pending_llm") or task_type in ("greeting","chitchat","help","out_of_scope")
+    # For out_of_scope/greeting, always skip; for chitchat/help, skip if no geospatial need
+    if query_intent in ("greeting","out_of_scope") or task_type in ("greeting","out_of_scope"):
+        # will be handled as friendly redirection, skip models
+        plan = {
+            "task_type": query_intent if query_intent in ("greeting","out_of_scope") else task_type,
+            "reasoning": f"Router classified as {query_intent or task_type} — outside geospatial premises, will redirect",
+            "required_assets": [],
+            "fusion_needed": False,
+            "temporal_needed": False,
+            "confidence": 0.95,
+            "skip_models": True,
+            "requires_coreg": False,
+            "tile_config": {"enabled": False, "size": 256, "overlap_px": 0},
+            "data_requirements": {"temporal": "single", "bands": [], "sar_pol": None},
+            "steps": ["response_composer"],
+            "fusion_method": "none",
+        }
+        state["plan"] = plan  # type: ignore
+        state["task_type"] = plan["task_type"]  # type: ignore
+        state["requires_coreg"] = False  # type: ignore
+        state["skip_models"] = True  # type: ignore
+        add_trace(state, "planner", "ok", {"plan": plan, "skip_models": True, "query_intent": query_intent, "router_task": task_type}, latency_ms=int((time.time()-t0)*1000))
+        sess = state.get("session_id")
+        if sess:
+            try:
+                await emit(sess, "thinking_delta", {"chunk": f"🧭 Planner: {query_intent} — outside premises, will redirect\n"})
+            except Exception:
+                pass
+        return state
+    if ((query_intent in ("chitchat", "help") or skip_hint or definitional_skip or is_non_geospatial) and not has_geospatial_need and not assets) or definitional_skip:
+        # also check if it's a followup that needs previous image context — if has_history, still skip unless it references spatial
+        if not state.get("is_followup") or not any(h in ql for h in ["that", "previous", "same area", "same region"]):
+            plan = {
+                "task_type": "chitchat",
+                "reasoning": f"Query is {query_intent} general text without requiring vision models — will answer directly via composer",
+                "required_assets": [],
+                "fusion_needed": False,
+                "temporal_needed": False,
+                "confidence": 0.95,
+                "skip_models": True,
+                "requires_coreg": False,
+                "tile_config": {"enabled": False, "size": 256, "overlap_px": 0},
+                "data_requirements": {"temporal": "single", "bands": [], "sar_pol": None},
+                "steps": ["response_composer"],
+                "fusion_method": "none",
+            }
+            state["plan"] = plan  # type: ignore
+            state["task_type"] = "chitchat"  # type: ignore
+            state["requires_coreg"] = False  # type: ignore
+            state["skip_models"] = True  # type: ignore
+            add_trace(state, "planner", "ok", {"plan": plan, "skip_models": True, "query_intent": query_intent}, latency_ms=int((time.time()-t0)*1000))
+            sess = state.get("session_id")
+            if sess:
+                try:
+                    await emit(sess, "thinking_delta", {"chunk": f"🧭 Planner: {query_intent} — skipping vision, direct text response\n"})
+                except Exception:
+                    pass
+            return state
     plan = call_qwen_planner(query, task_type, assets)
     # enforce task_type consistency
     if plan.get("task_type") != task_type:

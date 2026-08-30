@@ -166,8 +166,18 @@ export function TopCommandBar({
         </div>
       </div>
 
+      {/* ── Center: current analysis context (premium workspace feel) ── */}
+      <div className="hidden lg:flex items-center gap-2 min-w-0 flex-1 justify-center px-4">
+        <span className="inline-flex items-center gap-2 rounded-full bg-[#0B1120] border border-slate-700/40 px-3 py-1 text-[11px] text-slate-400 max-w-[420px] truncate">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#06B6D4] animate-pulse shrink-0" style={{ boxShadow: "0 0 6px #06B6D4" }} />
+          <span className="text-slate-300 font-medium truncate">Agricultural Intelligence</span>
+          <span className="text-slate-600">·</span>
+          <span className="truncate">Sentinel-2 · 2023 → 2025</span>
+        </span>
+      </div>
+
       {/* ── Right: status + pipeline button + avatar ─────────────────── */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-[#0B1120] border border-slate-700/40 px-2.5 py-1 text-[11px] text-slate-400">
           <span
             className="h-1.5 w-1.5 rounded-full bg-[#22C55E]"

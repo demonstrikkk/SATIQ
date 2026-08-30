@@ -109,17 +109,26 @@ export function RightThinkingPanel({ open, onClose }: { open: boolean; onClose: 
 
   return (
     <div className="w-[360px] h-full bg-[#0B1120] flex flex-col overflow-hidden">
-      {/* ── Header ── */}
-      <div className="h-12 shrink-0 sticky top-0 z-10 flex items-center justify-between px-4 border-b border-slate-800/50 bg-[#0B1120]">
-        <span className="text-[11px] font-semibold tracking-[0.1em] uppercase text-slate-200 flex items-center gap-2">
-          <span className={`h-6 w-6 rounded-md grid place-items-center border ${isInspection ? "bg-[#F59E0B]/10 border-[#F59E0B]/20 text-[#F59E0B]" : "bg-[#06B6D4]/10 border-[#06B6D4]/20 text-[#06B6D4]"}`}>
-            {isInspection ? <Cpu size={12} /> : <Satellite size={12} />}
+      {/* ── Header: Analysis Trace (user-safe, never "Thinking") ── */}
+      <div className="h-[56px] shrink-0 sticky top-0 z-10 flex items-center justify-between px-4 border-b border-slate-800/50 bg-[#0B1120]/95 backdrop-blur">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className={`h-7 w-7 rounded-lg grid place-items-center border shrink-0 ${isInspection ? "bg-[#F59E0B]/10 border-[#F59E0B]/20 text-[#F59E0B]" : running ? "bg-[#06B6D4]/10 border-[#06B6D4]/20 text-[#06B6D4]" : "bg-[#101827] border-slate-700/40 text-slate-500"}`}>
+            {isInspection ? <Cpu size={13} /> : <Satellite size={13} className={running ? "animate-pulse" : ""} />}
           </span>
-          {isInspection ? "Inspection" : "Pipeline"}
-        </span>
-        <div className="flex items-center gap-2">
+          <div className="min-w-0 leading-none">
+            <div className="text-[11px] font-semibold tracking-[0.11em] uppercase text-slate-100 flex items-center gap-2">
+              {isInspection ? "Inspection" : "Analysis Trace"}
+              {!isInspection && running && <span className="h-1.5 w-1.5 rounded-full bg-[#06B6D4] animate-pulse" style={{ boxShadow: "0 0 8px #06B6D4" }} />}
+              {!isInspection && !running && globalStatus === "completed" && <span className="h-1.5 w-1.5 rounded-full bg-[#22C55E]" />}
+            </div>
+            <div className="text-[11px] font-mono text-slate-600 truncate mt-0.5">
+              {!isInspection ? (running ? "Live · operational trace" : globalStatus === "completed" ? `Completed · ${totalMs ? `${(totalMs/1000).toFixed(1)}s` : "—"}` : "Idle · awaiting query") : "Selected feature"}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
           <span
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium border ${
+            className={`hidden sm:inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium border ${
               globalStatus === "completed"
                 ? "bg-[#22C55E]/10 border-[#22C55E]/20 text-[#22C55E]"
                 : globalStatus === "failed"
@@ -139,16 +148,15 @@ export function RightThinkingPanel({ open, onClose }: { open: boolean; onClose: 
                       ? "bg-[#475569]"
                       : "bg-[#06B6D4] animate-pulse"
               }`}
-              style={globalStatus !== "idle" && globalStatus !== "failed" && globalStatus !== "completed" ? { boxShadow: "0 0 6px #06B6D4" } : undefined}
             />
-            {globalStatus === "idle" ? "Idle" : globalStatus === "completed" ? "Completed" : globalStatus === "failed" ? "Failed" : "Running"}
+            {globalStatus === "idle" ? "Idle" : globalStatus === "completed" ? "Done" : globalStatus === "failed" ? "Failed" : "Live"}
           </span>
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7 rounded-lg bg-[#101827] border border-slate-700/40 hover:bg-[#141F30] hover:border-slate-600/40 text-slate-500 hover:text-slate-200"
             onClick={onClose}
-            aria-label="Close"
+            aria-label="Close trace"
           >
             <X size={14} />
           </Button>
@@ -156,29 +164,41 @@ export function RightThinkingPanel({ open, onClose }: { open: boolean; onClose: 
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* ── Planner Task card ── elevated surface ── */}
+        {/* ── Current Task ── per prompt §10, elevated, feels like live operational state ── */}
         <div className="p-4 border-b border-slate-800/40 bg-[#0B1120]">
           <div className="rounded-xl border border-slate-700/40 bg-[#101827] overflow-hidden" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.35)" }}>
             <div className="px-3.5 py-3">
-              <SectionLabel label="Planner Task" active={globalStatus !== "idle"} icon={Sparkles} />
-              <div className="text-[13px] font-semibold text-slate-100 mt-2 leading-snug truncate">
-                {plannerDetails?.goal ?? (globalStatus === "idle" ? "No active task — send a query" : "Waiting for planner…")}
+              <SectionLabel label="Current Task" active={globalStatus !== "idle"} icon={Sparkles} />
+              <div className="text-[13px] font-semibold text-slate-100 mt-2 leading-snug line-clamp-2">
+                {plannerDetails?.goal ?? (globalStatus === "idle" ? "No active task — send a query" : "Understanding request…")}
               </div>
-              <div className="flex gap-1.5 mt-2 flex-wrap">
-                {(plannerDetails?.capabilities ?? (globalStatus === "idle" ? [] : ["awaiting planner"])).slice(0, 3).map((c) => (
-                  <span key={c} className="rounded-full bg-[#0B1120] border border-slate-700/40 px-2.5 py-1 text-[11px] text-slate-400 font-mono truncate max-w-[180px] inline-block">
-                    {c}
-                  </span>
-                ))}
+              {/* task / image / model / status grid */}
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-lg bg-[#05080F]/60 border border-slate-800/40 px-2.5 py-2">
+                  <div className="text-[10px] font-semibold tracking-[0.07em] uppercase text-slate-600">Task</div>
+                  <div className="text-slate-300 font-medium truncate mt-0.5">{plannerDetails?.capabilities?.[0] ?? (globalStatus === "idle" ? "—" : "inferring…")}</div>
+                </div>
+                <div className="rounded-lg bg-[#05080F]/60 border border-slate-800/40 px-2.5 py-2">
+                  <div className="text-[10px] font-semibold tracking-[0.07em] uppercase text-slate-600">Image</div>
+                  <div className="text-slate-300 font-mono text-[11px] truncate mt-0.5">{plannerDetails?.spatial_target ? "AOI loaded" : "—"}</div>
+                </div>
+                <div className="rounded-lg bg-[#05080F]/60 border border-slate-800/40 px-2.5 py-2">
+                  <div className="text-[10px] font-semibold tracking-[0.07em] uppercase text-slate-600">Model</div>
+                  <div className="text-slate-300 font-mono text-[11px] truncate mt-0.5">{plannerDetails?.llm ?? "qwen-3.5-9b"}</div>
+                </div>
+                <div className="rounded-lg bg-[#05080F]/60 border border-slate-800/40 px-2.5 py-2">
+                  <div className="text-[10px] font-semibold tracking-[0.07em] uppercase text-slate-600">Status</div>
+                  <div className={`font-medium truncate mt-0.5 ${running ? "text-[#06B6D4]" : globalStatus === "completed" ? "text-[#22C55E]" : "text-slate-400"}`}>{running ? "Analysing…" : globalStatus === "completed" ? "Complete" : globalStatus === "idle" ? "Idle" : globalStatus}</div>
+                </div>
               </div>
-              <div className="text-[11px] text-slate-600 mt-2.5 flex items-center gap-1.5 font-mono">
-                <Clock3 size={10} className="text-slate-500" /> {fmt(now)} · {plannerDetails?.llm ?? "qwen-3.5-9b"} · {plannerDetails?.spatial_target ?? "AOI pending"}
+              <div className="text-[11px] text-slate-600 mt-3 flex items-center gap-1.5 font-mono">
+                <Clock3 size={10} className="text-slate-500" /> {fmt(now)} · {totalMs ? `${(totalMs/1000).toFixed(1)}s elapsed` : "awaiting"}
               </div>
             </div>
             {plannerDetails?.coreference_resolved ? (
               <div className="mx-3.5 mb-3 rounded-lg bg-[#05080F]/60 border border-slate-800/50 px-3 py-2.5">
                 <div className="text-[11px] leading-relaxed text-slate-400">
-                  We noticed you meant <span className="text-slate-100 font-medium">the water body from your last question</span> — so we’ll zoom right in there.
+                  Resolved to <span className="text-slate-100 font-medium">the water body from your last question</span> — zooming there.
                 </div>
                 <details className="mt-2 group">
                   <summary className="text-[10px] font-mono text-slate-600 cursor-pointer hover:text-slate-400 transition-colors">
@@ -195,10 +215,13 @@ export function RightThinkingPanel({ open, onClose }: { open: boolean; onClose: 
         </div>
 
         <div className="p-4 space-y-6">
-          {/* ── Timeline ── */}
+          {/* ── Analysis Trace — live operational timeline (user-safe, no CoT) ── */}
           <div>
-            <SectionLabel label="Planner Timeline" count={plannerTasks.length ? `${plannerTasks.length} tasks` : "—"} active={timelineActive} icon={Layers} />
-            <div className="text-[11px] text-slate-600 mt-1 mb-3 font-mono">LLM planner assigned · {plannerDetails ? "live" : "waiting"}</div>
+            <SectionLabel label="Analysis Trace" count={plannerTasks.length ? `${plannerTasks.length} steps` : "—"} active={timelineActive} icon={Layers} />
+            <div className="text-[11px] text-slate-600 mt-1 mb-3 font-mono flex items-center gap-1.5">
+              <span className={`h-1.5 w-1.5 rounded-full ${plannerDetails ? "bg-[#06B6D4] animate-pulse" : "bg-slate-600"}`} />
+              {plannerDetails ? "Operational trace · live" : "Awaiting planner assignment"}
+            </div>
             {plannerTasks.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-700/40 bg-[#101827]/40 p-5 text-center">
                 <div className="h-8 w-8 rounded-lg bg-[#05080F] border border-slate-800/50 grid place-items-center mx-auto mb-2">

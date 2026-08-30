@@ -156,41 +156,50 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
 
         # extract trace to broadcast step-by-step for UI compatibility
         trace = result_state.get("execution_trace") or []
-        # planner_done
+        # planner_done — always
         plan = result_state.get("plan") or {}
         task_type = result_state.get("task_type","vqa")
+        # Fast path: greeting/chitchat/out_of_scope/help with skip_models should not emit heavy model events
+        is_fast_path = bool(plan.get("skip_models") or result_state.get("skip_models") or task_type in ("chitchat","greeting","help","out_of_scope"))
         await _broadcast(session_id, "planner_done", {"goal": plan.get("reasoning",""), "task_type": task_type, "capabilities": [task_type], "llm":"qwen3.5-9b", "goals":[task_type], "plan": plan})
-        await _broadcast(session_id, "execution_started", {"gis": {"operation": "tiling+coreg", "coreg": result_state.get("coreg",{})}})
+        if not is_fast_path:
+            await _broadcast(session_id, "execution_started", {"gis": {"operation": "tiling+coreg", "coreg": result_state.get("coreg",{})}})
 
-        # model events — infer from encoder/task
-        encoder = result_state.get("encoder","satmae")
-        task_output = result_state.get("task_output") or {}
-        final = result_state.get("final_result") or task_output
+            # model events — infer from encoder/task
+            encoder = result_state.get("encoder","satmae")
+            task_output = result_state.get("task_output") or {}
+            final = result_state.get("final_result") or task_output
 
-        # emit model_started/done
-        model_name_map = {
-            "vqa": "RS-VQA",
-            "grounding": "GroundingDINO",
-            "change_vqa": "ChangeChat",
-            "optical_sar_fusion": "CROMA Fusion",
-            "captioning": "RS-VQA",
-        }
-        model_name = model_name_map.get(task_type, encoder)
-        await _broadcast(session_id, "model_started", {"model": model_name})
-        await asyncio.sleep(0.15)
-        await _broadcast(session_id, "model_progress", {"progress": 0.6})
-        await asyncio.sleep(0.1)
-        # pass through task_output details
-        await _broadcast(session_id, "model_done", {"model": model_name, **{k:v for k,v in task_output.items() if k not in ("fused_repr","embeddings")}, "status": "OK" if not result_state.get("error") else "FAILED"})
+            # emit model_started/done
+            model_name_map = {
+                "vqa": "RS-VQA",
+                "grounding": "GroundingDINO",
+                "change_vqa": "ChangeChat",
+                "optical_sar_fusion": "CROMA Fusion",
+                "captioning": "RS-VQA",
+            }
+            model_name = model_name_map.get(task_type, encoder)
+            await _broadcast(session_id, "model_started", {"model": model_name})
+            await asyncio.sleep(0.15)
+            await _broadcast(session_id, "model_progress", {"progress": 0.6})
+            await asyncio.sleep(0.1)
+            # pass through task_output details
+            await _broadcast(session_id, "model_done", {"model": model_name, **{k:v for k,v in task_output.items() if k not in ("fused_repr","embeddings")}, "status": "OK" if not result_state.get("error") else "FAILED"})
 
-        await _broadcast(session_id, "evidence_started")
-        await asyncio.sleep(0.05)
-        conf = final.get("confidence") or result_state.get("confidence") or 0.82
-        await _broadcast(session_id, "evidence_done", {"confidence": conf, "evidence_count": 1})
+            await _broadcast(session_id, "evidence_started")
+            await asyncio.sleep(0.05)
+            conf = final.get("confidence") or result_state.get("confidence") or 0.82
+            await _broadcast(session_id, "evidence_done", {"confidence": conf, "evidence_count": 1})
 
-        # Router/planner already streamed their real reasoning as thinking_delta
-        # during the pipeline run. Close the thinking block now.
-        await _broadcast(session_id, "thinking_done")
+            # Router/planner already streamed their real reasoning as thinking_delta
+            # during the pipeline run. Close the thinking block now.
+            await _broadcast(session_id, "thinking_done")
+        else:
+            # Fast path: still close thinking, but no heavy model evidence
+            task_output = result_state.get("task_output") or {}
+            final = result_state.get("final_result") or task_output
+            conf = final.get("confidence") or result_state.get("confidence") or 0.82
+            await _broadcast(session_id, "thinking_done")
 
         # answer streaming — if the composer node already streamed tokens live
         # (true real-time via Groq), do NOT re-chunk the main text (would

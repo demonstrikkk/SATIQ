@@ -52,8 +52,8 @@ async def error_handler_node(state: GraphState) -> GraphState:
     # Note: real sleep is handled by pipeline retry loop (after_vision/after_fusion) via
     # asyncio.sleep(backoff_ms/1000) there, not here, to keep error_handler fast for tests.
     # The backoff_ms value is used by the caller to sleep before re-entering the node.
-    # DLQ emit when permanently failed or transient retries exhausted
-    is_exhausted = (error_type == "permanent") or (error_type == "transient" and not state.get("_needs_retry"))
+    # DLQ emit when permanently failed or transient retries exhausted (except greeting/out_of_scope — not an error)
+    is_exhausted = (error_type == "permanent" and error_code not in ("greeting", "out_of_scope")) or (error_type == "transient" and not state.get("_needs_retry"))
     if is_exhausted:
         try:
             dlq_push(state.get("session_id") or rk or "unknown", {
@@ -70,20 +70,37 @@ async def error_handler_node(state: GraphState) -> GraphState:
             pass
     # ensure final_result contains structured error
     if not state.get("final_result"):
-        state["final_result"] = {
-            "task": state.get("task_type","unknown"),
-            "query": state.get("query",""),
-            "answer_text": f"Unable to complete analysis: {err}",
-            "confidence": 0.0,
-            "error": err,
-            "error_code": error_code,
-            "error_type": error_type,
-            "error_log": elog,
-            "execution_trace": state.get("execution_trace", []),
-            "request_key": rk,
-            "degraded": state.get("degraded", False),
-            "backoff_ms": backoff_ms,
-        }
+        # friendly greeting / out_of_scope, not "Unable to complete"
+        if error_code in ("greeting", "out_of_scope"):
+            state["final_result"] = {
+                "task": "chitchat",
+                "query": state.get("query",""),
+                "answer_text": err,  # err already is friendly greeting / premises message
+                "confidence": 1.0,
+                "error": None,
+                "error_code": error_code,
+                "error_type": None,
+                "error_log": [],
+                "execution_trace": state.get("execution_trace", []),
+                "request_key": rk,
+                "degraded": False,
+                "backoff_ms": 0,
+            }
+        else:
+            state["final_result"] = {
+                "task": state.get("task_type","unknown"),
+                "query": state.get("query",""),
+                "answer_text": f"Unable to complete analysis: {err}",
+                "confidence": 0.0,
+                "error": err,
+                "error_code": error_code,
+                "error_type": error_type,
+                "error_log": elog,
+                "execution_trace": state.get("execution_trace", []),
+                "request_key": rk,
+                "degraded": state.get("degraded", False),
+                "backoff_ms": backoff_ms,
+            }
     else:
         # attach error metadata to existing final_result
         try:

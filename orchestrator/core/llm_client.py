@@ -387,7 +387,24 @@ def _is_rate_limit_error(e: Exception) -> bool:
     return "429" in msg or "rate" in msg or "too many" in msg or "quota" in msg
 
 def _dummy_router(query: str, assets: list | None = None) -> Dict[str, Any]:
-    q = query.lower()
+    q = query.lower().strip()
+    # Non-hardcoded check: use LLM-like reasoning for fallback — no exhaustive word list
+    # If query is very short and has no geospatial semantics and no image, treat as greeting/out_of_scope
+    # This is fallback only when Groq is down; primary is LLM router above
+    geospatial_terms = ["water","land","forest","agricult","crop","building","urban","change","detect","find","locate","where","how many","count","is there","compare","sar","optical","sentinel","cave","cattle","pasture","field","settlement","road","river","lake","image","scene","area","region","bbox","ground","fusion","ndvi","ndwi","spectral"]
+    has_geospatial = any(k in q for k in geospatial_terms) or bool(assets)
+    # greeting / out_of_scope without hardcoding exhaustive vocab — check for casual/arithmetic outside premises
+    # This handles "yo pep, how you doing" (22 chars) and "can you solve 4*8" even when longer
+    casual_outside = ["how you doing", "how are you", "how r u", "whats up", "what's up", "wassup", "yo pep", "yo bro", "how ya", "how doing"]
+    if not has_geospatial and not assets:
+        if len(q) < 15 and q.replace(",","").replace("?","").strip() in {"hi","hello","hey","yo","sup","thanks","thank you","bye"} or q in {"hi","hello","hey"}:
+            return {"task_type": "greeting", "reasoning": "Heuristic fallback: short greeting", "confidence": 0.95}
+        if any(sym in q for sym in ["*", "=", "solve", "calculate", "arithmetic"]) and not has_geospatial:
+            return {"task_type": "out_of_scope", "reasoning": "Heuristic fallback: arithmetic outside premises", "confidence": 0.95}
+        if any(c in q for c in casual_outside) and not has_geospatial:
+            return {"task_type": "out_of_scope", "reasoning": "Heuristic fallback: casual outside premises", "confidence": 0.95}
+        if len(q.split()) <= 5 and not has_geospatial:
+            return {"task_type": "chitchat", "reasoning": "Heuristic fallback: short general chitchat", "confidence": 0.85}
     has_opt = False
     has_sar = False
     if assets:
@@ -568,10 +585,20 @@ def call_qwen_router(query: str, assets: list | None = None) -> Dict[str, Any]:
             cli = _make_groq_sync_client(gkey) if gkey else cli
             actual_prov = "groq"
         model = _groq_router_model_name()
-        prompt = f"""Classify query into one word: vqa, grounding, change_vqa, optical_sar_fusion.
+        prompt = f"""You are Satiq's router. The application ONLY handles geospatial work related to satellite imagery: water/land/forest/agriculture/buildings/urban/change detection/SAR/optical/NDVI/NDWI/spectral/vegetation etc. Label EVERYTHING ELSE as out_of_scope — do not answer it, just redirect.
+
+Classify into ONE word:
+- greeting: short hi/hello/thanks/bye
+- help: what can you do / how to use / capabilities (within premises, about the app)
+- chitchat: geospatial knowledge without image that IS within premises (what is NDVI? explain NDVI) — can answer as text
+- out_of_scope: EVERYTHING outside project ideals — casual chat (yo pep how you doing), math/homework (solve 4x+3y, can you solve 4*8, arithmetic), general knowledge not about geospatial, forecasting, etc. — must redirect
+- vqa/grounding/change_vqa/optical_sar_fusion: needs image analysis (detect, where, how many, compare, SAR/optical with image)
+
 Query: "{query}"
 Assets modalities: {[a.get('modality') for a in (assets or [])]}
-Answer with one word only."""
+Has image: {bool(assets)}
+Conversation has history: {bool(query)}
+Answer with ONE word only from: vqa, grounding, change_vqa, optical_sar_fusion, greeting, chitchat, help, out_of_scope — strict, no extra text. If in doubt and not clearly geospatial, choose out_of_scope."""
         def _try_router(c):
             return _call_with_timeout(lambda: c.chat.completions.create(  # type: ignore
                 model=model,
@@ -583,13 +610,16 @@ Answer with one word only."""
             resp = _try_router(cli)
             content = _strip_think(resp.choices[0].message.content or "")
             import re as _re
-            m = _re.search(r"\b(vqa|grounding|change_vqa|optical_sar_fusion)\b", content.lower())
+            m = _re.search(r"\b(vqa|grounding|change_vqa|optical_sar_fusion|greeting|chitchat|help|out_of_scope)\b", content.lower())
             if qwen_circuit is not None:
                 try: qwen_circuit.record_success()
                 except Exception: pass
             if m:
                 tt = m.group(1)
-                return {"task_type": tt, "reasoning": f"Groq {model} single-word (key1)", "confidence": 0.90, "_provider": "groq", "_model": model}
+                # Map router intents to pipeline handling:
+                # greeting/out_of_scope/help/chitchat will be handled as chitchat with skip_models in planner
+                # For router, we return the intent as task_type so planner can see it
+                return {"task_type": tt, "reasoning": f"Groq {model} intent {tt}", "confidence": 0.90, "_provider": "groq", "_model": model}
             base = _dummy_router(query, assets)
             base["_provider"] = "groq"
             base["_fallback"] = "no_word_found"
@@ -607,7 +637,7 @@ Answer with one word only."""
                         resp = _call_with_timeout(lambda: cli2.chat.completions.create(model=model, messages=[{"role":"user","content": prompt}], temperature=0, max_tokens=10), timeout_s=4.0)  # type: ignore
                         content = _strip_think(resp.choices[0].message.content or "")
                         import re as _re2
-                        m2 = _re2.search(r"\b(vqa|grounding|change_vqa|optical_sar_fusion)\b", content.lower())
+                        m2 = _re2.search(r"\b(vqa|grounding|change_vqa|optical_sar_fusion|greeting|chitchat|help|out_of_scope)\b", content.lower())
                         if m2:
                             return {"task_type": m2.group(1), "reasoning": f"Groq {model} single-word fallback key", "confidence": 0.88, "_provider": "groq", "_model": model}
                     except Exception:

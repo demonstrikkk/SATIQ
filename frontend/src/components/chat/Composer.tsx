@@ -465,7 +465,7 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
 
     const canSend = useMemo(() => text.trim().length > 0 || activeContexts.length > 0, [text, activeContexts]);
 
-    // ---- Stop handler — real agentic cancel (POST /api/query/:id/cancel) + mock fallback
+    // ---- Stop handler — real agentic cancel + force reset if stuck (fixes post-complete glitch)
     const handleStop = useCallback(async () => {
       // try real first
       try {
@@ -476,8 +476,28 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
         }
       } catch {}
       const ok = cancelCurrentQuery();
-      if (ok) toast.message("Stopped generation");
-      else toast.message("Stop requested");
+      if (ok) {
+        toast.message("Stopped generation");
+        return;
+      }
+      // Fallback: if isBusy is stuck true but no abort id (stream already ended),
+      // force reset so UI returns to Send state
+      const { globalStatus } = useExecutionStore.getState();
+      const isStuckBusy = ["queued","planning","executing","aggregating","composing"].includes(globalStatus as any);
+      if (isStuckBusy) {
+        const { useChatStore } = await import("@/store/chat.store");
+        const msgs = useChatStore.getState().messages;
+        const last = [...msgs].reverse().find(m => m.role === "assistant");
+        if (last && (last as any).streaming) {
+          useChatStore.getState().setStreaming(last.id, false);
+          useChatStore.getState().setThinkingStreaming(last.id, false);
+        }
+        useExecutionStore.getState().setGlobalStatus("completed" as any);
+        useExecutionStore.getState().setComposerStatus("completed" as any);
+        toast.message("Reset to idle");
+        return;
+      }
+      toast.message("Stop requested");
     }, []);
 
     return (

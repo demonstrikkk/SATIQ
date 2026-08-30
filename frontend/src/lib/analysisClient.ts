@@ -66,7 +66,9 @@ export async function executeRealAnalysis(
     body: JSON.stringify({ query, asset_ids: asset_ids.length ? asset_ids : undefined, spatial_refs: spatial_refs.length ? spatial_refs : undefined }),
     signal: effectiveSignal,
   });
-  if (res.status === 401) {
+  // 401 or 403 both mean token invalid/expired or session belongs to old user.
+  // For single-user dev, auto-heal: clear stale token, re-login with deterministic userId, retry once.
+  if (res.status === 401 || res.status === 403) {
     localStorage.removeItem(TOKEN_KEY);
     tok = await ensureAuth();
     res = await fetch(`${GATEWAY}/api/query`, {
@@ -76,7 +78,7 @@ export async function executeRealAnalysis(
       signal: effectiveSignal,
     });
   }
-  if (res.status === 401) {
+  if (res.status === 401 || res.status === 403) {
     // Token still rejected after re-login → surface a login prompt. Best-effort.
     try { window.dispatchEvent(new CustomEvent("satiq:auth-required", { detail: { reason: "invalid_token" } })); } catch {}
   }
@@ -170,19 +172,40 @@ export async function executeRealAnalysis(
       throw e;
     }
   } finally {
-    // close stuck streaming if orchestrator closed SSE before query_completed
+    // Force completion when stream ends — fixes Stop glitch where response is done but isBusy stayed true
+    // This handles both normal (query_completed) and fast skip paths (greeting/out_of_scope)
     try {
       const { useChatStore } = await import("@/store/chat.store");
-      const msgs = useChatStore.getState().messages;
-      const last = msgs.find(m => m.role === "assistant" && (m as any).streaming);
-      if (last) {
-        useChatStore.getState().setStreaming(last.id, false);
-        useChatStore.getState().setThinkingStreaming(last.id, false);
-        const { useExecutionStore } = await import("@/store/execution.store");
-        const gs = useExecutionStore.getState().globalStatus;
-        if (["queued","planning","executing","aggregating","composing"].includes(gs as any)) {
+      const { useExecutionStore } = await import("@/store/execution.store");
+      const exec = useExecutionStore.getState();
+      const gs = exec.globalStatus;
+      const isBusy = ["queued","planning","executing","aggregating","composing"].includes(gs as any);
+      if (isBusy) {
+        // Ensure any streaming message is closed
+        const msgs = useChatStore.getState().messages;
+        const lastStreaming = msgs.find(m => m.role === "assistant" && (m as any).streaming);
+        if (lastStreaming) {
+          useChatStore.getState().setStreaming(lastStreaming.id, false);
+          useChatStore.getState().setThinkingStreaming(lastStreaming.id, false);
+        }
+        // Also close thinking if still open
+        const lastThinking = msgs.find(m => m.role === "assistant" && (m as any).thinkingStreaming);
+        if (lastThinking) {
+          useChatStore.getState().setThinkingStreaming(lastThinking.id, false);
+        }
+        // Force global to completed so isBusy becomes false and Stop hides / Send returns
+        // Only do this if we actually received some content or stream ended normally (not on explicit cancel/error)
+        const hasContent = msgs.some(m => m.role === "assistant" && m.content.length > 0);
+        if (hasContent || gs !== "idle") {
           useExecutionStore.getState().setGlobalStatus("completed" as any);
           useExecutionStore.getState().setComposerStatus("completed" as any);
+          // Also mark all pipeline steps as completed to stop spinners
+          const steps = exec.pipelineSteps;
+          const anyRunning = steps.some(s => s.status === "running");
+          if (anyRunning) {
+            // Let setGlobalStatus handle freezing timers, but ensure it ran
+            useExecutionStore.getState().setGlobalStatus("completed" as any);
+          }
         }
       }
     } catch {}

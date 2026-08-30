@@ -13,13 +13,27 @@ if (!fs.existsSync(sessionDir)) {
 
 // Helper to sanitize session ID and get safe file path
 const getSessionFilePath = (userId: string, sessionId: string): string => {
-  // Regex validation: only alphanumeric, hyphens, and underscores allowed
   const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '');
   const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '');
   return path.join(sessionDir, `${safeUserId}_${safeSessionId}.json`);
 };
 
+// Single-user helper: find session file regardless of owner prefix.
+// For "we are the only user" dev, old sessions with random usr_* prefix must remain accessible
+// after re-login with deterministic usr_demo. Searches for "*_{sessionId}.json".
+const findSessionFile = (sessionId: string): string | null => {
+  const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '');
+  try {
+    const files = fs.readdirSync(sessionDir);
+    const match = files.find(f => f.endsWith(`_${safeSessionId}.json`));
+    if (match) return path.join(sessionDir, match);
+  } catch {}
+  return null;
+};
+
 // GET /api/sessions - List all sessions for the current user
+// Single-user dev: returns all sessions regardless of owner prefix so old
+// sessions with random usr_* remain visible after deterministic usr_demo login.
 router.get('/', (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.userId;
   if (!userId) {
@@ -29,8 +43,13 @@ router.get('/', (req: AuthenticatedRequest, res: Response) => {
   try {
     const files = fs.readdirSync(sessionDir);
     const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '');
-    const userSessions = files
-      .filter(file => file.startsWith(`${safeUserId}_`) && file.endsWith('.json'))
+    let filtered = files.filter(file => file.startsWith(`${safeUserId}_`) && file.endsWith('.json'));
+    // Fallback for single-user: if no user-specific sessions, return all json sessions
+    // This heals orphaned sessions from previous random userId logins.
+    if (filtered.length === 0) {
+      filtered = files.filter(file => file.endsWith('.json'));
+    }
+    const userSessions = filtered
       .map(file => {
         const filePath = path.join(sessionDir, file);
         const data = fs.readFileSync(filePath, 'utf-8');
@@ -57,7 +76,12 @@ router.get('/:id', (req: AuthenticatedRequest, res: Response) => {
     return res.status(401).json({ error: 'User context not found' });
   }
 
-  const filePath = getSessionFilePath(userId, sessionId);
+  let filePath = getSessionFilePath(userId, sessionId);
+  // Single-user fallback: if not found under current user, search any owner
+  if (!fs.existsSync(filePath)) {
+    const found = findSessionFile(sessionId);
+    if (found) filePath = found;
+  }
 
   if (!fs.existsSync(filePath)) {
     // idempotent — frontend may ref stale ids after restart; don't spam 404
@@ -116,7 +140,12 @@ router.put('/:id', (req: AuthenticatedRequest, res: Response) => {
     return res.status(401).json({ error: 'User context not found' });
   }
 
-  const filePath = getSessionFilePath(userId, sessionId);
+  let filePath = getSessionFilePath(userId, sessionId);
+  // Single-user fallback: migrate orphaned file if found under old user
+  if (!fs.existsSync(filePath)) {
+    const found = findSessionFile(sessionId);
+    if (found) filePath = found;
+  }
 
   if (!fs.existsSync(filePath)) {
     // upsert on PUT — avoids 404 noise when frontend syncs after gateway restart
@@ -165,7 +194,11 @@ router.delete('/:id', (req: AuthenticatedRequest, res: Response) => {
     return res.status(401).json({ error: 'User context not found' });
   }
 
-  const filePath = getSessionFilePath(userId, sessionId);
+  let filePath = getSessionFilePath(userId, sessionId);
+  if (!fs.existsSync(filePath)) {
+    const found = findSessionFile(sessionId);
+    if (found) filePath = found;
+  }
 
   if (!fs.existsSync(filePath)) {
     // idempotent delete — frontend may double-delete on fast nav

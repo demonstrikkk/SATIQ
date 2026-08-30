@@ -19,9 +19,11 @@ router.post('/login', (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Server authentication is not configured (JWT_SECRET missing)' });
   }
 
-  // STUB: demo-stage auth — any non-empty credentials are accepted and mapped to
-  // a fresh user id. Replace with a real identity provider before external deployment.
-  const userId = `usr_${Math.random().toString(36).slice(2, 11)}`;
+  // Single-user dev: deterministic userId per username so sessions survive
+  // re-login / token refresh. Random IDs caused "session belongs to another user"
+  // 403s when gateway restarted or token refreshed.
+  const cleanName = username.trim().toLowerCase();
+  const userId = `usr_${cleanName.replace(/[^a-z0-9]/g, "") || "demo"}`;
   const token = jwt.sign(
     { userId, username: username.trim() },
     secret,

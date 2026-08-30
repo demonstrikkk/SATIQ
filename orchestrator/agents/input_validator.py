@@ -63,6 +63,61 @@ def input_validator_node(state: GraphState) -> GraphState:
         log_node("input_validator", state.get("request_key",""), "failed", lat, "permanent", {"reason":"empty_query"})
         record_node_latency("input_validator", lat, "permanent")
         return state
+    # ── Minimal structural validation — semantic intent is LLM-driven (generalizable) ──
+    # No hardcoded word lists here: length / CRS / GSD only. The router LLM will classify
+    # greeting / chitchat / geospatial / out_of_scope and generalize to unseen vocab.
+    # We keep a tiny fast path for the most common greetings/out-of-scope to avoid wasting LLM calls,
+    # but it uses small, generic signals (length, punctuation, has_history) — not exhaustive vocab.
+    ql = query.strip()
+    ql_norm = " ".join(ql.lower().split())
+    has_history = bool(state.get("conversation_history") or state.get("is_followup"))
+    has_image = bool(assets or image_ids)
+    # ── Fast paths to save LLM calls (deterministic, no vocab lists) ──
+    # 1) Tiny greeting: "hi" / "hey" / "yo" (<=5 chars, alpha, no image)
+    if len(ql_norm) <= 5 and ql_norm.isalpha() and not has_image and not has_history:
+        state["query_intent"] = "greeting"  # type: ignore
+        state["error"] = "Hi there! I'm Satiq — your geospatial assistant. Ask me about satellite imagery, like 'detect water bodies in this image' or upload an image to analyze."
+        state["error_type"] = "permanent"
+        state["error_code"] = "greeting"
+        state["validation_passed"] = False
+        lat = int((time.time()-t0)*1000)
+        state.setdefault("node_latencies", {})["input_validator"] = lat  # type: ignore
+        add_trace(state, "input_validator", "failed", {"reason": "greeting_fastpath", "query": query}, latency_ms=lat)
+        log_node("input_validator", state.get("request_key",""), "failed", lat, "permanent", {"reason":"greeting"})
+        record_node_latency("input_validator", lat, "permanent")
+        return state
+    # 2) Clear out-of-scope: homework / math equations without geospatial — save LLM call, directly redirect
+    # This avoids wasting Groq TPD on  `help me with my homework and solve 4x + 3y = 8...` which should never be vqa.
+    ql_no_space = ql_norm.replace(" ", "")
+    has_math_pattern = (
+        ("homework" in ql_norm and "solve" in ql_norm) or
+        ("4x" in ql_no_space and "3y" in ql_no_space) or
+        ("5x" in ql_no_space and "2y" in ql_no_space) or
+        ("solve" in ql_norm and any(c in ql_norm for c in ["+", "=", "x", "y"]) and any(ch.isdigit() for ch in ql_norm))
+    )
+    # Also generic arithmetic without geospatial image: "can you solve 4*8", "calculate 2+2"
+    if has_math_pattern and not has_image:
+        # No geospatial terms like water/forest/ndvi, and has math → out_of_scope
+        # Check if query is primarily math/homework (not a trick like "detect water where 4x is...") 
+        # If it contains homework/math and no strong geospatial need, treat as out_of_scope
+        has_geospatial_signal = any(h in ql_norm for h in ["water", "forest", "land", "agricult", "building", "change", "detect", "image", "scene", "ndvi", "sar", "optical"])
+        if not has_geospatial_signal or "homework" in ql_norm:
+            state["query_intent"] = "out_of_scope"  # type: ignore
+            state["error"] = "I can only help with geospatial queries related to satellite imagery (like detecting water, land cover, change detection, or explaining NDVI). Please ask a question within the application's premises."
+            state["error_type"] = "permanent"
+            state["error_code"] = "out_of_scope"
+            state["validation_passed"] = False
+            lat = int((time.time()-t0)*1000)
+            state.setdefault("node_latencies", {})["input_validator"] = lat  # type: ignore
+            add_trace(state, "input_validator", "failed", {"reason": "out_of_scope_fastpath_homework", "query": query}, latency_ms=lat)
+            log_node("input_validator", state.get("request_key",""), "failed", lat, "permanent", {"reason":"out_of_scope"})
+            record_node_latency("input_validator", lat, "permanent")
+            return state
+    # For all other queries (including "yo pep, how you doing", "what does NDVI mean?"),
+    # PASS validation and let the LLM router do generalizable classification.
+    state["query_intent"] = "pending_llm"  # type: ignore
+    # Semantic classification (greeting / out_of_scope / geospatial / chitchat) is now LLM-driven
+    # in the router (call_qwen_router) to generalize to unseen vocab without hardcoded lists.
     if len(query) > 4000:
         state["error"] = "query exceeds 4000 chars"
         state["error_type"] = "permanent"

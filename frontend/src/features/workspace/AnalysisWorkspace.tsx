@@ -126,30 +126,30 @@ export function AnalysisWorkspace() {
           </AnimatePresence>
         </motion.div>
 
-        {/* ── Main Chat Area ──────────────────────────────────────────── */}
+        {/* ── Main Chat Area — dominant stage ─────────────────────────────── */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative" style={{ background: "#05080F" }}>
           <div className="flex-1 min-h-0 flex flex-col">
             <ChatCanvas />
           </div>
 
-          {/* Satellite canvas trigger bar */}
+          {/* Satellite canvas trigger bar — subtle, not competing */}
           {hasConversation && (
-            <div className="shrink-0 border-t border-slate-800/50 bg-[#0B1120] h-10 flex items-center justify-between px-4">
-              <span className="text-[11px] font-semibold tracking-[0.07em] text-slate-400 flex items-center gap-2 uppercase">
-                <span className="h-5 w-5 rounded-md bg-[#101827] border border-slate-700/40 grid place-items-center">
+            <div className="shrink-0 border-t border-slate-800/40 bg-[#0B1120]/90 backdrop-blur h-9 flex items-center justify-between px-4">
+              <span className="text-[11px] font-semibold tracking-[0.07em] text-slate-500 flex items-center gap-2 uppercase">
+                <span className="h-5 w-5 rounded-md bg-[#101827] border border-slate-700/30 grid place-items-center">
                   <Globe size={11} className="text-[#06B6D4]" />
                 </span>
                 Satellite Canvas
                 <span className="hidden sm:inline font-normal tracking-normal normal-case text-slate-600">
                   — Bengaluru · 7d · EPSG:32617
                 </span>
-                <span className="hidden lg:inline-flex ml-1 rounded-full bg-[#22C55E]/8 border border-[#22C55E]/15 px-2 py-0.5 text-[10px] text-[#22C55E] font-medium normal-case tracking-normal">
+                <span className="hidden lg:inline-flex ml-1 rounded-full bg-[#22C55E]/10 border border-[#22C55E]/15 px-2 py-0.5 text-[10px] text-[#22C55E] font-medium normal-case tracking-normal">
                   Ready
                 </span>
               </span>
               <Button
                 size="sm"
-                className="h-6 rounded-full bg-[#101827] border border-slate-700/40 text-slate-300 hover:bg-[#141F30] hover:text-slate-100 hover:border-slate-600/50 text-[11px] px-3 gap-1.5 shadow-none"
+                className="h-6 rounded-full bg-[#101827] border border-slate-700/30 text-slate-400 hover:bg-[#141F30] hover:text-slate-200 hover:border-slate-600/30 text-[11px] px-3 gap-1.5 shadow-none"
                 onClick={() => setMapOpen(true)}
               >
                 <Satellite size={11} />
@@ -157,6 +157,22 @@ export function AnalysisWorkspace() {
               </Button>
             </div>
           )}
+
+          {/* ── Workspace status bar — scientific, quiet, per prompt §33 ── */}
+          <div className="shrink-0 h-6 flex items-center justify-between px-4 border-t border-slate-800/30 bg-[#0B1120]/60 backdrop-blur text-[10px] font-mono text-slate-600">
+            <span className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[#22C55E]" style={{ boxShadow: "0 0 5px #22C55E" }} /> SATIQ CORE · ONLINE</span>
+              <span className="hidden sm:inline text-slate-700">|</span>
+              <span className="hidden sm:inline">Vision-LandCover v2</span>
+            </span>
+            <span className="hidden md:flex items-center gap-3">
+              <span>4096 × 4096</span>
+              <span className="text-slate-800">·</span>
+              <span>EPSG:32617</span>
+              <span className="text-slate-800">·</span>
+              <span>28.6139 · 77.2090</span>
+            </span>
+          </div>
         </div>
 
         {/* ── Right Thinking Panel ─────────────────────────────────────── */}

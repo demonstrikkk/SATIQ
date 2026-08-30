@@ -94,8 +94,15 @@ export const StreamingResponseCard = memo(function StreamingResponseCard({
   };
   const sanitizedMarkdown = sanitizeStreamingMarkdown(bufferedMarkdown);
 
+  const isAnalysis = !isStreaming && sanitizedMarkdown.length > 40;
+
   return (
-    <div className="overflow-hidden">
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: [0.22,1,0.36,1] }}
+      className="overflow-hidden"
+    >
       {/* Thinking Accordion — html .trace-box style: border + surface, max 340 */}
       {hasThinking && (
         <div className="mb-3 rounded-[8px] border border-slate-700/40 bg-[#121615] overflow-hidden max-w-[340px]">
@@ -145,11 +152,27 @@ export const StreamingResponseCard = memo(function StreamingResponseCard({
         </div>
       )}
 
-      {/* Main content — html .msg-text: no card, transparent, 14/1.65 */}
-      <div className="text-slate-100 text-[14px] leading-[1.65]">
-        <StreamMarkdown content={sanitizedMarkdown} />
-        {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-[#06B6D4] animate-pulse align-middle" />}
-      </div>
-    </div>
+      {/* Main content — analysis artifact: when complete, feels like mini report */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.12, duration: 0.3 }}
+        className={isAnalysis ? "rounded-xl border border-slate-700/30 bg-[#0B1120]/40 overflow-hidden" : ""}
+      >
+        {isAnalysis && (
+          <div className="px-4 py-2.5 border-b border-slate-700/30 bg-[#0B1120]/60 flex items-center justify-between">
+            <span className="text-[11px] font-semibold tracking-[0.09em] uppercase text-slate-500 flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#06B6D4]" style={{ boxShadow: "0 0 6px #06B6D4" }} />
+              Analysis
+            </span>
+            <span className="text-[11px] font-mono text-slate-600">{modelLabel ?? "Vision-LandCover"}</span>
+          </div>
+        )}
+        <div className={`text-slate-100 text-[14px] leading-[1.65] ${isAnalysis ? "px-4 py-4" : ""}`}>
+          <StreamMarkdown content={sanitizedMarkdown} />
+          {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-[#06B6D4] animate-pulse align-middle" />}
+        </div>
+      </motion.div>
+    </motion.div>
   );
 });

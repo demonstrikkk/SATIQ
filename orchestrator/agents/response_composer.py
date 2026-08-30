@@ -57,6 +57,33 @@ async def response_composer_node(state: GraphState) -> GraphState:
     composer_version = int(state.get("composer_version") or 1)  # type: ignore
     session_id = state.get("session_id")
 
+    # Fast path for greeting / out_of_scope / help — no LLM, premises redirection
+    # This is more robust than hardcoding word lists: the intent comes from LLM router
+    if task_type in ("greeting", "out_of_scope", "help") or state.get("query_intent") in ("greeting", "out_of_scope", "help"):
+        intent = task_type if task_type in ("greeting", "out_of_scope", "help") else state.get("query_intent", "greeting")
+        if intent == "greeting" or task_type == "greeting":
+            composed = "Hi there! I'm Satiq — your geospatial assistant. Ask me about satellite imagery, like 'detect water bodies in this image' or upload an image to analyze."
+        elif intent == "out_of_scope":
+            composed = "I can only help with geospatial queries related to satellite imagery (like detecting water, land cover, change detection, or explaining NDVI). Please ask a question within the application's premises."
+        else:  # help / chitchat help
+            composed = "I can help with satellite imagery analysis: detect land cover, locate objects (water, buildings), compare images for change detection, or fuse optical/SAR. Try 'detect water bodies' or upload an image."
+        # Stream the fixed answer for UI consistency
+        if session_id:
+            await emit(session_id, "answer_delta", {"chunk": composed})
+        output = dict(final)
+        output["answer_text"] = composed
+        output["query"] = query
+        output["task"] = intent
+        output["confidence"] = 1.0
+        output["composed_by"] = "deterministic"
+        output["_session_id"] = session_id
+        output["followup_suggestions"] = _followup_suggestions(intent, final)
+        output["confidence_explanation"] = "Deterministic premises check — no model confidence needed."
+        output["composer_version"] = composer_version
+        state["final_result"] = output
+        add_trace(state, "response_composer", "ok", {"composed_len": len(composed), "premises_redirect": intent}, latency_ms=int((time.time()-t0)*1000))
+        return state
+
     # If final already has answer_text from dummy, optionally enhance via Qwen
     base_answer = final.get("answer_text","")
     # Only call Qwen if not in error path and Qwen available — else keep dummy

@@ -46,6 +46,22 @@ def after_coreg_gate(state: GraphState) -> Literal["vision_encoder","preprocessi
     state["error_code"] = "coreg_ssim_below_threshold"
     return "error_handler"
 
+def after_planner(state: GraphState) -> Literal["preprocessing","response_composer"]:
+    plan = state.get("plan") or {}
+    # Generalizable skip: if planner set skip_models (LLM-driven for any new vocab), jump to composer
+    # This handles greeting/chitchat/help/out_of_scope and definitional NDVI without hardcoding word lists
+    if plan.get("skip_models") or state.get("skip_models"):
+        return "response_composer"
+    # Also handle any non-geospatial intent that should not run vision
+    if state.get("query_intent") in ("greeting","chitchat","help","out_of_scope") or state.get("task_type") in ("greeting","chitchat","help","out_of_scope","general"):
+        return "response_composer"
+    if plan.get("task_type") in ("greeting","chitchat","help","out_of_scope","general","REFUSE"):
+        return "response_composer"
+    # REFUSE also goes to composer for friendly message
+    if plan.get("task_type") == "REFUSE" or state.get("task_type") == "REFUSE":
+        return "response_composer"
+    return "preprocessing"
+
 def after_post_processing(state: GraphState) -> Literal["task_agent","response_composer","error_handler"]:
     if state.get("_needs_retry"):
         policy = state.get("retry_policy") or {"max_confidence": 3}
@@ -122,7 +138,7 @@ def build_graph():
     g.add_conditional_edges("input_validator", after_validator, {"router":"coreference_resolver", "error_handler":"error_handler"})
     g.add_edge("coreference_resolver", "router")
     g.add_edge("router", "planner")
-    g.add_edge("planner", "preprocessing")
+    g.add_conditional_edges("planner", after_planner, {"preprocessing":"preprocessing", "response_composer":"response_composer"})
     g.add_edge("preprocessing", "encoder_selector")
     g.add_edge("encoder_selector", "encoder_compat")
     g.add_conditional_edges("encoder_compat", after_compat, {"coreg_gate":"coreg_gate", "error_handler":"error_handler"})
