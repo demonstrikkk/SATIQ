@@ -228,6 +228,23 @@ git remote add origin https://github.com/<you>/satiq.git
 git push -u origin main
 ```
 
+
+# TO RUN COMPLETE APPLICATION
+```bash
+Start-Process powershell -ArgumentList '-NoExit', '-Command', 'cd C:\Users\asus\Downloads\Satiq; $env:PYTHONPATH="."; .\orchestrator\.venv\Scripts\python.exe -m uvicorn orchestrator.api.main:app --host 0.0.0.0 --port 8000'; Start-Process powershell -ArgumentList '-NoExit', '-Command', 'npm --prefix C:\Users\asus\Downloads\Satiq\gateway run dev'; Start-Process powershell -ArgumentList '-NoExit', '-Command', 'npm --prefix C:\Users\asus\Downloads\Satiq\frontend run dev'
+
+
+
+
+```
+or
+```bash
+npm --prefix .\Satiq\gateway run dev
+npm --prefix .\Satiq\frontend run dev
+cd .\Satiq; $env:PYTHONPATH="."; .\orchestrator\.venv\Scripts\python.exe -m uvicorn orchestrator.api.main:app --host 0.0.0.0 --port 8000
+```
+
+
 > Current state: scaffold complete (`aa6fef2`), no model/LLM code yet. Follow build priority above.
 
 ---

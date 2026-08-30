@@ -3,7 +3,8 @@ from __future__ import annotations
 import time
 import json
 from orchestrator.models.graph_state import GraphState, add_trace
-from orchestrator.core.llm_client import call_qwen_composer
+from orchestrator.core.llm_client import call_qwen_composer_stream
+from orchestrator.core.events import emit
 from orchestrator.helpers.chart_spec import CHART_PROMPT_FRAGMENT
 
 def _confidence_explanation(final: Dict[str, Any], state: GraphState) -> str:
@@ -47,28 +48,42 @@ def _followup_suggestions(task_type: str, final: Dict[str, Any]) -> list:
         cands = [f"Show {cats[0]} magnitude as chart?" ] + cands[:2]
     return cands[:3]
 
-def response_composer_node(state: GraphState) -> GraphState:
+async def response_composer_node(state: GraphState) -> GraphState:
     t0 = time.time()
     final = state.get("final_result") or state.get("task_output") or {}
     query = state.get("query","")
     trace = state.get("execution_trace") or []
     task_type = state.get("task_type","vqa")
     composer_version = int(state.get("composer_version") or 1)  # type: ignore
+    session_id = state.get("session_id")
 
     # If final already has answer_text from dummy, optionally enhance via Qwen
     base_answer = final.get("answer_text","")
     # Only call Qwen if not in error path and Qwen available — else keep dummy
     if final.get("error"):
         composed = base_answer
+        streamed = False
     else:
         try:
-            composed = call_qwen_composer(query, final, trace)
+            composed_parts: list = []
+            streamed = False
+            async for tok in call_qwen_composer_stream(query, final, trace):
+                composed_parts.append(tok)
+                streamed = True
+                if session_id:
+                    await emit(session_id, "answer_delta", {"chunk": tok})
+            composed = "".join(composed_parts)
             # Ensure composed is not empty
             if not composed or len(composed.strip())<10:
                 composed = base_answer
         except Exception as e:
             composed = base_answer
+            streamed = False
             state.setdefault("error_log", []).append(f"composer fallback: {e}")  # type: ignore
+
+    # mark streamed so run_pipeline does not re-chunk the already-streamed text
+    if streamed:
+        state["_composer_streamed"] = True
 
     # add composer's enrichment: keep evidence fields, add markdown with confidence badge
     output = dict(final)

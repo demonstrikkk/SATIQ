@@ -54,27 +54,63 @@ def dummy_vqa(fused_repr, query: str, image_id: str = "img_001") -> Dict[str, An
 
 def dummy_grounding(fused_repr, query: str, image_id: str = "img_001") -> Dict[str, Any]:
     rnd = random.Random(_seed(query + "ground"))
-    # simulate bbox around water/northern sector
-    bbox_norm = [0.18, 0.09, 0.47, 0.42]  # x_min, y_min, x_max, y_max normalized
-    bbox_xyxy = [120, 45, 310, 210]
-    # vary slightly
+    ql = query.lower()
+    # query-aware: agriculture vs water vs building etc.
+    if any(k in ql for k in ["agriculture","agricultural","crop","cultivat","field","farm","cattle","pasture","grazing"]):
+        label = "agricultural field"
+        sector = "central sector"
+        bbox_norm = [0.22, 0.31, 0.68, 0.72]
+        bbox_xyxy = [140, 160, 380, 340]
+        answer_text = f"Agricultural land detected in the {sector} with confidence {{conf:.2f}}. BBox (normalized) {{bbox_norm}} corresponds to xyxy {{bbox_xyxy}}."
+    elif any(k in ql for k in ["building","built-up","settlement","urban","house","construction","development"]):
+        label = "built-up area"
+        sector = "eastern sector"
+        bbox_norm = [0.52, 0.28, 0.81, 0.61]
+        bbox_xyxy = [280, 150, 420, 300]
+        answer_text = f"Built-up area detected in the {sector} with confidence {{conf:.2f}}. BBox (normalized) {{bbox_norm}} corresponds to xyxy {{bbox_xyxy}}."
+    elif any(k in ql for k in ["cave","caves"]):
+        label = "cave"
+        sector = "rocky northern ridge"
+        bbox_norm = [0.33, 0.12, 0.41, 0.24]
+        bbox_xyxy = [180, 60, 240, 130]
+        answer_text = f"No caves are visible in this high-resolution optical image (10 m GSD, EPSG:32617). The terrain shows agricultural fields and settlement, but no karst or cave signatures were detected. Confidence {{conf:.2f}}."
+    elif any(k in ql for k in ["forest","tree","vegetation","wood"]):
+        label = "forest patch"
+        sector = "western edge"
+        bbox_norm = [0.08, 0.32, 0.21, 0.68]
+        bbox_xyxy = [50, 170, 130, 330]
+        answer_text = f"Forest patch detected along the {sector} with confidence {{conf:.2f}}. BBox (normalized) {{bbox_norm}} corresponds to xyxy {{bbox_xyxy}}."
+    elif any(k in ql for k in ["water","lake","river","pond","reservoir"]):
+        label = "water body"
+        sector = "northern sector"
+        bbox_norm = [0.18, 0.09, 0.47, 0.42]
+        bbox_xyxy = [120, 45, 310, 210]
+        answer_text = f"Water body detected in the {sector} with confidence {{conf:.2f}}. BBox (normalized) {{bbox_norm}} corresponds to xyxy {{bbox_xyxy}}."
+    else:
+        label = "target"
+        sector = "central sector"
+        bbox_norm = [0.25, 0.25, 0.62, 0.58]
+        bbox_xyxy = [150, 130, 340, 290]
+        answer_text = f"{label.capitalize()} detected in the {sector} with confidence {{conf:.2f}}. BBox (normalized) {{bbox_norm}} corresponds to xyxy {{bbox_xyxy}}."
     jitter = (rnd.random()-0.5)*0.04
     bbox_norm = [round(max(0,min(1, v+jitter)), 3) for v in bbox_norm]
     conf = round(0.82 + rnd.random()*0.08, 2)
-    # generate second bbox for multi-detection case if query mentions multiple
+    # fill template
+    answer_text = answer_text.format(conf=conf, bbox_norm=bbox_norm, bbox_xyxy=bbox_xyxy)
     bbox_list = [bbox_xyxy]
-    if "multiple" in query.lower() or "all" in query.lower():
+    if "multiple" in ql or "all" in ql:
         bbox_list = [bbox_xyxy, [310, 210, 420, 320]]
+    phrase_map = {label: [bbox_xyxy]}
     return {
         "task": "grounding",
         "query": query,
         "image_id": image_id,
-        "answer_text": f"Water body detected in the northern sector with confidence {conf:.2f}. BBox (normalized) {bbox_norm} corresponds to xyxy {bbox_xyxy}.",
+        "answer_text": answer_text,
         "bbox_normalized": bbox_norm,
         "bbox_xyxy": bbox_xyxy,
         "bbox": bbox_norm,
         "bbox_list": bbox_list,
-        "phrase_grounding_map": {"water body": [bbox_xyxy]},
+        "phrase_grounding_map": phrase_map,
         "mask_rle": None,
         "confidence": conf,
         "detections": len(bbox_list),
@@ -83,6 +119,8 @@ def dummy_grounding(fused_repr, query: str, image_id: str = "img_001") -> Dict[s
         "answer_unit": "count",
         "per_tile_confidence": {f"{image_id}_tile_0": conf},
         "attention_maps": None,
+        "detected_label": label,
+        "sector": sector,
     }
 
 def dummy_change_vqa(fused_repr, query: str, image_t1_id: str = "img_2021", image_t2_id: str = "img_2023") -> Dict[str, Any]:

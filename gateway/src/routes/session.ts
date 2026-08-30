@@ -60,7 +60,8 @@ router.get('/:id', (req: AuthenticatedRequest, res: Response) => {
   const filePath = getSessionFilePath(userId, sessionId);
 
   if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'Session not found or access denied' });
+    // idempotent — frontend may ref stale ids after restart; don't spam 404
+    return res.status(200).json({ sessionId, notFound: true });
   }
 
   try {
@@ -75,17 +76,20 @@ router.get('/:id', (req: AuthenticatedRequest, res: Response) => {
 // POST /api/sessions - Create a new session
 router.post('/', (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.userId;
-  const { name, metadata } = req.body;
+  const { name, metadata, sessionId: reqSessionId } = req.body || {};
 
   if (!userId) {
     return res.status(401).json({ error: 'User context not found' });
   }
 
-  const sessionId = `sess_${Math.random().toString(36).substr(2, 9)}`;
-  const filePath = getSessionFilePath(userId, sessionId);
+  // Accept a client-supplied sessionId (must be safe) so frontend + backend ids stay in sync.
+  const safeId = typeof reqSessionId === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(reqSessionId)
+    ? reqSessionId
+    : `sess_${Math.random().toString(36).substr(2, 9)}`;
+  const filePath = getSessionFilePath(userId, safeId);
 
   const newSession = {
-    sessionId,
+    sessionId: safeId,
     userId,
     name: name || `Session ${new Date().toLocaleString()}`,
     createdAt: new Date().toISOString(),
@@ -115,7 +119,22 @@ router.put('/:id', (req: AuthenticatedRequest, res: Response) => {
   const filePath = getSessionFilePath(userId, sessionId);
 
   if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'Session not found or access denied' });
+    // upsert on PUT — avoids 404 noise when frontend syncs after gateway restart
+    const fresh = {
+      sessionId,
+      userId,
+      name: name || `Session ${new Date().toLocaleString()}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      metadata: metadata || {},
+      chatHistory: chatHistory || [],
+    };
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(fresh, null, 2), 'utf-8');
+      return res.status(200).json(fresh);
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to create session on update', details: error.message });
+    }
   }
 
   try {
@@ -149,7 +168,8 @@ router.delete('/:id', (req: AuthenticatedRequest, res: Response) => {
   const filePath = getSessionFilePath(userId, sessionId);
 
   if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'Session not found or access denied' });
+    // idempotent delete — frontend may double-delete on fast nav
+    return res.status(200).json({ message: 'Session already absent', sessionId });
   }
 
   try {

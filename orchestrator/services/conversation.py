@@ -1,11 +1,13 @@
-"""Conversation history + followup detection.
+"""Conversation history + followup detection — SQLite backed for local dev.
 
-GraphState gets conversation_history[] and followup_anchor.
-History is loaded from PostgreSQL task_outputs fallback to in-memory EXECUTIONS + minio/storage.
+Uses orchestrator/storage/memory.db (SQLite) as the single source of truth when
+PostgreSQL is not available. This gives the pipeline real chat memory without
+an external DB, and survives restarts.
 """
 from __future__ import annotations
 import json
 import os
+import sqlite3
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -19,13 +21,61 @@ except Exception:
 
 from orchestrator.services.query_analyzer import detect_followup_intent
 
-MEM_HISTORY: Dict[str, List[Dict[str, Any]]] = {}  # session_id -> list
+MEM_HISTORY: Dict[str, List[Dict[str, Any]]] = {}  # fallback cache
+
+def _sqlite_path() -> Path:
+    return Path("orchestrator/storage/memory.db")
+
+def _ensure_sqlite():
+    p = _sqlite_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        con = sqlite3.connect(str(p))
+        cur = con.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                query TEXT,
+                task_type TEXT,
+                confidence REAL,
+                answer_text TEXT,
+                result_json TEXT,
+                image_ids TEXT
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_conv_session ON conversation_history(session_id, id)")
+        con.commit()
+        con.close()
+    except Exception:
+        pass
+
+_ensure_sqlite()
 
 def _history_dir() -> Path:
     return Path("orchestrator/storage/history")
 
 def load_history(session_id: str, n: int = 5) -> List[Dict[str, Any]]:
-    # try memory first
+    # SQLite first — real memory
+    try:
+        _ensure_sqlite()
+        con = sqlite3.connect(str(_sqlite_path()))
+        cur = con.cursor()
+        cur.execute("SELECT result_json FROM conversation_history WHERE session_id=? ORDER BY id DESC LIMIT ?", (session_id, n))
+        rows = cur.fetchall()
+        con.close()
+        if rows:
+            hist = []
+            for (j,) in reversed(rows):
+                try:
+                    hist.append(json.loads(j))
+                except Exception:
+                    hist.append({"result_json": j})
+            return hist[-n:]
+    except Exception:
+        pass
+    # try memory
     hist = MEM_HISTORY.get(session_id, [])
     if hist:
         return hist[-n:]
@@ -38,7 +88,6 @@ def load_history(session_id: str, n: int = 5) -> List[Dict[str, Any]]:
                 return data[-n:]
         except Exception:
             pass
-    # try minio storage path
     alt = Path("orchestrator/storage/task_outputs") / f"{session_id}.json"
     if alt.exists():
         try:
@@ -49,7 +98,34 @@ def load_history(session_id: str, n: int = 5) -> List[Dict[str, Any]]:
 
 def save_history(session_id: str, entry: Dict[str, Any]) -> None:
     MEM_HISTORY.setdefault(session_id, []).append(entry)
-    # also persist to disk
+    # SQLite persist — primary store for chat memory
+    try:
+        _ensure_sqlite()
+        con = sqlite3.connect(str(_sqlite_path()))
+        cur = con.cursor()
+        import time
+        result_json = json.dumps(entry, default=str)
+        query = entry.get("query") or entry.get("task_output", {}).get("query") or ""
+        task_type = entry.get("task_type") or entry.get("task_output", {}).get("task") or ""
+        confidence = entry.get("confidence") or entry.get("task_output", {}).get("confidence")
+        answer_text = entry.get("task_output", {}).get("answer_text") or entry.get("answer_text") or ""
+        image_ids = ",".join([str(x) for x in (entry.get("image_ids") or [])]) if entry.get("image_ids") else ""
+        if not image_ids:
+            task_out = entry.get("task_output") or {}
+            ids = []
+            for k in ["image_id","image_t1_id","image_t2_id","optical_image_id","sar_image_id"]:
+                if task_out.get(k):
+                    ids.append(task_out[k])
+            image_ids = ",".join(ids)
+        cur.execute("INSERT INTO conversation_history (session_id, created_at, query, task_type, confidence, answer_text, result_json, image_ids) VALUES (?,?,?,?,?,?,?,?)",
+                    (session_id, time.time(), query, task_type, confidence, answer_text[:2000], result_json, image_ids))
+        # keep last 50 per session
+        cur.execute("DELETE FROM conversation_history WHERE id NOT IN (SELECT id FROM conversation_history WHERE session_id=? ORDER BY id DESC LIMIT 50) AND session_id=?", (session_id, session_id))
+        con.commit()
+        con.close()
+    except Exception:
+        pass
+    # also disk backup
     hd = _history_dir()
     hd.mkdir(parents=True, exist_ok=True)
     path = hd / f"{session_id}.json"
@@ -58,7 +134,6 @@ def save_history(session_id: str, entry: Dict[str, Any]) -> None:
         if path.exists():
             existing = json.loads(path.read_text())
         existing.append(entry)
-        # keep last 20
         existing = existing[-20:]
         path.write_text(json.dumps(existing, indent=2))
     except Exception:

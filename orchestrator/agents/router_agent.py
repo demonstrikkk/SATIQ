@@ -3,10 +3,11 @@ from __future__ import annotations
 import time
 from orchestrator.models.graph_state import GraphState, add_trace
 from orchestrator.core.llm_client import call_qwen_router
+from orchestrator.core.events import emit
 from orchestrator.services.query_analyzer import detect_temporal_keywords, detect_spatial_keywords, detect_comparison_keywords
 from orchestrator.services.conversation import augment_state_with_history
 
-def router_node(state: GraphState) -> GraphState:
+async def router_node(state: GraphState) -> GraphState:
     t0 = time.time()
     # followup + conversation history first
     try:
@@ -43,4 +44,13 @@ def router_node(state: GraphState) -> GraphState:
     state["task_type"] = task_type  # type: ignore
     state["plan"] = result  # initial plan, planner will refine
     add_trace(state, "router", "ok", {"task_type": task_type, "raw": result}, latency_ms=int((time.time()-t0)*1000))
+    # surface the real router decision as a live "thinking" delta in the chat
+    sess = state.get("session_id")
+    if sess:
+        conf = result.get("confidence")
+        txt = f"🔀 Router: classified as `{task_type}` (confidence {conf}).\n"
+        try:
+            await emit(sess, "thinking_delta", {"chunk": txt})
+        except Exception:
+            pass
     return state

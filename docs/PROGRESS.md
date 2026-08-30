@@ -2,7 +2,7 @@
 
 > Kanban + milestone view. Every task that writes/edits/deletes code must move a row here in the **same commit/PR** that changes code. Stale = incomplete.
 
-**Last updated:** 2026-08-29 · **Branch:** `main` · **Head:** `wip`
+**Last updated:** 2026-08-30 · **Branch:** `main` · **Head:** `wip`
 
 ## Milestones
 
@@ -96,12 +96,24 @@
 | 2026-08-29 | T-073 | Image ingest `services/image_ingest.py` FFmpeg/Pillow | PASS — `POST /api/v1/ingest` PNG `img_001.png` → `validation valid:true, bands:3` + `thumbnail` + `exif` | wip |
 | 2026-08-29 | T-074 | Query analyzer + conversation + geocoder | PASS — `detect_temporal` `2021,2023` `is_temporal:true`; `geocoder resolve Sector A → [79.0,12.0,79.5,12.5]`; followup `sess_follow1` second query inherits `img_2021,img_2023` → `change_vqa` not grounding | wip |
 | 2026-08-29 | T-075 | Spectral `ndvi/ndwi/ndbi/evi` dummy trace + band check | PASS — `preprocessing` trace `spectral:{ndvi_mean:0.42...}` for change/fusion; `encoder_compat` `band_reports` with `Cartosat no NIR` warning | wip |
+| 2026-08-30 | T-088 | Groq latency + false-failure fix | PASS — `gateway npx tsc --noEmit` OK; `call_qwen_router` 1.51s, `call_qwen_planner` 1.42s; poll budget 360s→240s | wip |
+| 2026-08-30 | T-089 | Thinking text + timer freeze | PASS — `frontend npm run build` + `gateway tsc`; async planner/router emit real reasoning; clocks stop at terminal | wip |
+| 2026-08-30 | T-090 | Composer `<think>` stripping + edit/retry UX | PASS — `frontend build` + `gateway tsc` + `pytest orchestrator/tests/test_pipeline.py` (4 passed); `run_pipeline` E2E `answer_delta` clean (no `<think>`), `query_completed`; real Groq composer ~2.2s/229 chars (was 90s+) | wip |
+| 2026-08-30 | T-091 | Multi-key distribution (2 Groq + 1 Mistral) + full display | PASS — `frontend build` + `gateway tsc` + `pytest orchestrator/tests/test_pipeline.py + test_validator.py` (8 passed); `GET /api/v1/llm/status` `key_count:2 mistral:true`; `run_pipeline` `Where is water body` 51 events, 2 thinking deltas, 34 answer chunks, `completed` with chart/bbox, no rate-limit | wip |
 | 2026-08-29 | T-076 | GeoJSON `GET /task/{sid}/geojson` + Report `POST /session/{sid}/report` + Recompose `POST /task/{sid}/recompose` | PASS — grounding GeoJSON `FeatureCollection 1 feat`; report html 1488B; recompose v2 `followup_suggestions[0]=What is area in ha?` | wip |
 | 2026-08-29 | T-077 | Trace summary `GET /session/{sid}/trace/summary` + Benchmark `POST /benchmark` vrsbench | PASS — `total_ms:66, slowest:planner, breakdown`; benchmark `accuracy:0.0 count_mae:0.26 num:2` | wip |
 | 2026-08-29 | T-080 | `pytest tests -q` resilience | PASS — `13 passed, 1 skipped` (happy, permanent, transient, idempotency, backpressure 429, circuit breaker) 77s | wip |
 | 2026-08-29 | T-080 | `GET /health/live` + `/health/ready` | PASS — `{"status":"ready","qwen":"closed","vision":"ready","fusion":"ready","queue":0}` | wip |
 | 2026-08-29 | T-081 | `gateway npm run typecheck` + `frontend npm run build` | PASS — gateway `tsc --noEmit` (no errors), frontend `tsc && vite build` 2559 modules | wip |
 | 2026-08-29 | T-081 | Manual gateway agentic `POST /api/query` via `ANALYSIS_PROVIDER=agentic` | PASS — `POST http://127.0.0.1:4000/api/query` → `{"execution_id":"exec_*","status":"running"}` + stream | wip |
+| 2026-08-30 | T-082 | STT voice input (mic) frontend + gateway `/api/stt` → orchestrator Whisper | PASS — gateway typecheck clean; `POST /api/stt` requires auth (401) and forwards to orchestrator `/api/v1/transcribe` (200, mock fallback for invalid file) | wip |
+| 2026-08-30 | T-083 | TTS speaker on assistant messages (client Web Speech API) | PASS — `frontend npm run build` 2574 modules; `MessageItem` speaker button added | wip |
+| 2026-08-30 | T-084 | Real-time LLM token streaming (event bus + async streaming composer) | PASS — orchestrator boots; composer streamed 430 live token chunks; `run_pipeline` skips re-chunk via `_streamed` flag (no duplication) | wip |
+| 2026-08-30 | T-085 | Charts already wired (StreamMarkdown `ChartBlock` + orchestrator `chart_spec`) | VERIFIED — no change needed; ````chart` fences render via react-apexcharts | wip |
+| 2026-08-30 | T-086 | Auto-auth (remove login UI, auto-JWT) | PASS — `Bootstrap.tsx` auto-mints JWT; `auth.ts ensureToken()`; gateway agentic default | wip |
+| 2026-08-30 | T-087 | Fix localStorage `QuotaExceededError` crash on chat persist (send dead) | PASS — `chat.store.ts` quota-safe storage + trimmed `partialize`; `useSessionPersistence` strips previews/caps; `frontend npm run build` OK | wip |
+| 2026-08-30 | T-088 | Fix false "Generation failed/interrupted" + cut LLM latency | PASS — gateway poll budget 36s→360s (env-tunable); planner/router→fast `GROQ_ROUTER_MODEL`, planner max_tokens 800→300, composer 600→400, groq `max_retries=1`; live router 1.5s/planner 1.4s (was ~94/97s) | wip |
+| 2026-08-30 | T-089 | Fix thinking display + perpetual timers on stop/drop | PASS — orchestrator emits real planner/router reasoning as `thinking_delta` (planner/router nodes now async+emit); `composer_started` moved before `pipeline.ainvoke` so live `answer_delta` is captured; on `cancelled`/`error` flip msg streaming flags; freeze step `durationMs` on terminal; right-panel + card clocks stop at terminal; gateway poll default 240s | wip |
 
 *Paste real command output in PRs — "tests pass" without evidence is not accepted (see `AGENTS.md:5`).*
 
@@ -118,3 +130,7 @@
 * CROMA checkpoint availability → fallback to dual Sentinel encoders + cross-attention (log ADR if switching).
 * Sentinel ↔ Cartosat/RISAT domain gap (GSD, bands, radiometry) → Input Handler normalization + CORAL/few-shot; track eval gap qualitatively.
 * GroundingDINO bbox → mask refinement with SAM is optional but satisfies visual evidence stronger — defer if compute-constrained, log it.
+* **4 vision model families kept mocked by design** (`dummy_encoders` SATMAE/SSL4EO/Prithvi/CROMA, `dummy_fusion`, `dummy_task_agents` VQA/Grounding/Change-VQA/Optical-SAR + degraded fallbacks). Only LLM text (Groq `qwen/qwen3.6-27b`) is real. Swap by replacing `dummy/` with trained checkpoints + `MOCK_QWEN=false`.
+* **TTS is client-only** (Web Speech API). Orchestrator has no voice-synthesis backend (only Groq Whisper STT). Add a TTS route if server-side synthesis is required.
+* **Real-time streaming** depends on Groq network latency; in sandbox it was slow (>110s for ~600 tokens) but tokens arrive live with no duplication. `_streamed` flag in `EXECUTIONS` prevents `run_pipeline` from re-chunking already-streamed text.
+* **STT requires browser microphone permission**; gateway `/api/stt` forwards to orchestrator `/api/v1/transcribe` (25MB cap, Groq Whisper). Mock fallback returns `_mock:true` when no `GROQ_API_KEY`.

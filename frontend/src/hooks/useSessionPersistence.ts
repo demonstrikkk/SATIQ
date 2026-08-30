@@ -5,6 +5,23 @@ import { toast } from "sonner";
 
 const keyFor = (id: string) => `satiq:session:${id}:messages`;
 
+// Serialize messages for storage: drop heavy image previews / File refs (data
+// URLs blow the ~5MB localStorage budget) and cap history length.
+function prepareForStorage(msgs: any[]): any[] {
+  return (msgs || []).slice(-50).map((m) => ({
+    ...m,
+    streaming: false,
+    thinkingStreaming: false,
+    contexts: (m.contexts ?? []).map((c: any) => ({
+      id: c.id,
+      type: c.type,
+      label: c.label,
+      confidence: c.confidence,
+      fileName: c.fileName,
+    })),
+  }));
+}
+
 export function useSessionPersistence() {
   const activeId = useWorkspaceStore((s) => s.activeAnalysisId);
   const messages = useChatStore((s) => s.messages);
@@ -19,8 +36,9 @@ export function useSessionPersistence() {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           const current = useChatStore.getState().messages;
-          if (JSON.stringify(current) !== JSON.stringify(parsed)) {
-            setMessages(parsed);
+          const cleaned = prepareForStorage(parsed);
+          if (JSON.stringify(current) !== JSON.stringify(cleaned)) {
+            setMessages(cleaned);
           }
           return;
         }
@@ -40,7 +58,7 @@ export function useSessionPersistence() {
     if (!activeId) return;
     const t = setTimeout(() => {
       try {
-        const toSave = messages.map((m: any) => ({ ...m, streaming: false, thinkingStreaming: false }));
+        const toSave = prepareForStorage(messages);
         localStorage.setItem(keyFor(activeId), JSON.stringify(toSave));
       } catch (e) {
         console.warn("[session] save failed", e);
@@ -54,7 +72,7 @@ export function useSessionPersistence() {
     const onBeforeUnload = () => {
       if (!activeId) return;
       try {
-        const cur = useChatStore.getState().messages.map((m: any) => ({ ...m, streaming: false, thinkingStreaming: false }));
+        const cur = prepareForStorage(useChatStore.getState().messages);
         localStorage.setItem(keyFor(activeId), JSON.stringify(cur));
       } catch {}
     };

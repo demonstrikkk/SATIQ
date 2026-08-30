@@ -13,6 +13,7 @@ import {
   Paperclip,
   MapPin,
   X,
+  Mic,
   Image as ImageIcon,
   Loader2,
   AlertCircle,
@@ -22,8 +23,8 @@ import {
 import { useChatStore, type ChatContext } from "@/store/chat.store";
 import { useWorkspaceStore } from "@/store/workspace.store";
 import { useExecutionStore } from "@/store/execution.store";
-import { simulateAnalysisQuery, cancelCurrentQuery } from "@/mocks/mockStream";
-import { executeRealAnalysis } from "@/lib/analysisClient";
+import { cancelCurrentQuery } from "@/mocks/mockStream";
+import { executeRealAnalysis, cancelCurrentAnalysis } from "@/lib/analysisClient";
 import { analyses } from "@/mocks/analyses";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -123,9 +124,25 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
     const [dragOver, setDragOver] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [dragRejectReason, setDragRejectReason] = useState<string | null>(null);
+    const [recording, setRecording] = useState(false);
+    const [transcribing, setTranscribing] = useState(false);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<BlobPart[]>([]);
+    const streamRef = useRef<MediaStream | null>(null);
 
     const fileRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+    const composerPrefill = useChatStore((s) => s.composerPrefill);
+    const setComposerPrefill = useChatStore((s) => s.setComposerPrefill);
+    useEffect(() => {
+      if (composerPrefill != null) {
+        setText(composerPrefill);
+        setComposerPrefill(null);
+        textareaRef.current?.focus();
+      }
+    }, [composerPrefill, setComposerPrefill]);
 
     const { activeContexts, addContext, removeContext, addMessage, queuedMessages, enqueue, removeQueued, clearContexts } = useChatStore();
     const { globalStatus } = useExecutionStore();
@@ -185,29 +202,57 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
           }
           return;
         }
-        // Immediate blob preview for instant UX, then upgrade to data URL for persistence (localStorage survival across reload).
+        // Create data URL synchronously for persistent preview (blob URLs revoke on reload)
         toAdd.forEach((f) => {
-          const id = `file_${Date.now()}_${f.name}_${Math.random().toString(36).slice(2, 5)}`;
-          let blobUrl: string | undefined;
-          try {
-            blobUrl = URL.createObjectURL(f);
-          } catch {}
-          addContext({ id, type: "image", label: f.name, file: f, preview: blobUrl } as Context);
-          // Upgrade to data URL async so snapshot sent a moment later has persistable preview
-          try {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const dataUrl = String(reader.result || "");
-              if (dataUrl.startsWith("data:")) {
-                const { activeContexts } = useChatStore.getState();
-                if (activeContexts.find((c) => c.id === id)) {
-                  useChatStore.getState().removeContext(id);
-                  useChatStore.getState().addContext({ id, type: "image", label: f.name, file: f, preview: dataUrl } as Context);
+          const tempId = `file_${Date.now()}_${f.name}_${Math.random().toString(36).slice(2, 5)}`;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = String(reader.result || "");
+            const preview = dataUrl.startsWith("data:") ? dataUrl : undefined;
+            addContext({ id: tempId, type: "image", label: f.name, file: f, preview } as Context);
+            // also keep blob for fast render until dataUrl ready if needed
+            if (!preview) {
+              try { const blobUrl = URL.createObjectURL(f); addContext({ id: tempId, type: "image", label: f.name, file: f, preview: blobUrl } as Context); } catch {}
+            }
+          };
+          try { reader.readAsDataURL(f); } catch {
+            try { const blobUrl = URL.createObjectURL(f); addContext({ id: tempId, type: "image", label: f.name, file: f, preview: blobUrl } as Context); } catch {}
+          }
+          // Real upload — POST /api/upload with field 'image', auth header, show progress
+          (async () => {
+            const isMock = (import.meta as any).env?.VITE_USE_MOCK === "true" || (import.meta as any).env?.VITE_USE_MOCKS === "true";
+            if (isMock) return; // mock mode keeps temp id
+            try {
+              const tok = localStorage.getItem("satiq_token");
+              const fd = new FormData();
+              fd.append("image", f, f.name);
+              const res = await fetch(`${(import.meta as any).env?.VITE_API_BASE ?? ""}/api/upload`, {
+                method: "POST",
+                headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+                body: fd,
+              });
+              if (!res.ok) {
+                const txt = await res.text().catch(() => "");
+                console.warn(`[upload] ${res.status}: ${txt.slice(0,120)}`);
+                toast.error(`Upload failed for ${f.name}: ${res.status}`);
+                return;
+              }
+              const data = (await res.json()) as any;
+              const asset = data.asset ?? data;
+              const assetId = asset?.asset_id ?? asset?.id;
+              if (assetId && assetId !== tempId) {
+                const cur = useChatStore.getState().activeContexts.find((c) => c.id === tempId);
+                if (cur) {
+                  useChatStore.getState().removeContext(tempId);
+                  useChatStore.getState().addContext({ id: assetId, type: "image", label: cur.label, file: f, preview: cur.preview } as Context);
                 }
               }
-            };
-            reader.readAsDataURL(f);
-          } catch {}
+              toast.success(`Uploaded ${f.name}`);
+            } catch (e) {
+              console.warn(`[upload] failed for ${f.name}:`, e);
+              // keep temp context — still usable with temp id (orchestrator synthesizes asset)
+            }
+          })();
         });
         if (toAdd.length < valid.length) {
           toast.message(`Added ${toAdd.length} of ${valid.length} files — ${maxAttachments} max.`);
@@ -231,6 +276,69 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
         toast.message("AOI already attached");
       }
     }, [active, activeContexts, addContext]);
+
+    // -------- Voice input (STT via gateway /api/stt → orchestrator Groq Whisper) --------
+    const stopRecording = useCallback(() => {
+      try { mediaRecorderRef.current?.stop(); } catch {}
+      setRecording(false);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }, []);
+
+    const startRecording = useCallback(async () => {
+      if (recording) {
+        stopRecording();
+        return;
+      }
+      if (transcribing) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        const mr = new MediaRecorder(stream);
+        audioChunksRef.current = [];
+        mr.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        };
+        mr.onstop = async () => {
+          const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || "audio/webm" });
+          audioChunksRef.current = [];
+          if (blob.size === 0) return;
+          setTranscribing(true);
+          try {
+            const tok = localStorage.getItem("satiq_token");
+            const fd = new FormData();
+            fd.append("file", blob, "speech.webm");
+            const res = await fetch(`${(import.meta as any).env?.VITE_API_BASE ?? ""}/api/stt`, {
+              method: "POST",
+              headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+              body: fd,
+            });
+            const data = (await res.json().catch(() => ({}))) as any;
+            if (!res.ok) {
+              toast.error(`Speech-to-text failed: ${data?.error || res.status}`);
+            } else {
+              const transcript = (data?.text || "").trim();
+              if (transcript) {
+                setText((prev) => (prev ? `${prev} ${transcript}` : transcript));
+                toast.success("Transcribed");
+              } else {
+                toast.message("No speech detected");
+              }
+            }
+          } catch {
+            toast.error("Speech-to-text request failed");
+          } finally {
+            setTranscribing(false);
+          }
+        };
+        mr.start();
+        mediaRecorderRef.current = mr;
+        setRecording(true);
+      } catch {
+        toast.error("Microphone access denied");
+        setRecording(false);
+      }
+    }, [recording, transcribing, stopRecording]);
 
     const handleSend = useCallback(
       async (override?: string) => {
@@ -267,10 +375,6 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
           const msg = err instanceof Error ? err.message : String(err);
           console.error("[analysis] gateway/orchestrator offline:", msg);
           setError(`Backend offline — agentic pipeline unreachable. ${msg.slice(0,120)}`);
-          if ((import.meta as any).env?.VITE_USE_MOCK === "true") {
-            console.warn("[analysis] VITE_USE_MOCK=true — falling back to mock");
-            await simulateAnalysisQuery(finalMessage, snapshot as any);
-          }
         }
       },
       [text, activeContexts, isBusy, queuedMessages.length, enqueue, clearContexts, onSend, addMessage]
@@ -290,11 +394,7 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             console.error("[analysis] queued gateway offline:", msg);
-            if ((import.meta as any).env?.VITE_USE_MOCK === "true") {
-              await simulateAnalysisQuery(combinedContent, combinedContexts as any);
-            } else {
-              setError(`Backend offline — ${msg.slice(0,100)}`);
-            }
+            setError(`Backend offline — ${msg.slice(0,100)}`);
           }
         }, 250);
       }
@@ -313,8 +413,20 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
         }
         if (e.key === "Escape" && isBusy) {
           e.preventDefault();
-          cancelCurrentQuery();
-          toast.message("Generation stopped");
+          // use same logic as handleStop — real cancel first
+          (async () => {
+            try {
+              const ok = await cancelCurrentAnalysis();
+              if (ok) toast.message("Stopped generation (backend)");
+              else {
+                const ok2 = cancelCurrentQuery();
+                if (ok2) toast.message("Stopped generation");
+              }
+            } catch {
+              const ok2 = cancelCurrentQuery();
+              if (ok2) toast.message("Stopped generation");
+            }
+          })();
         }
       },
       [handleSend, isBusy]
@@ -353,10 +465,19 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
 
     const canSend = useMemo(() => text.trim().length > 0 || activeContexts.length > 0, [text, activeContexts]);
 
-    // ---- Stop handler ----
-    const handleStop = useCallback(() => {
+    // ---- Stop handler — real agentic cancel (POST /api/query/:id/cancel) + mock fallback
+    const handleStop = useCallback(async () => {
+      // try real first
+      try {
+        const okReal = await cancelCurrentAnalysis();
+        if (okReal) {
+          toast.message("Stopped generation (backend)");
+          return;
+        }
+      } catch {}
       const ok = cancelCurrentQuery();
       if (ok) toast.message("Stopped generation");
+      else toast.message("Stop requested");
     }, []);
 
     return (
@@ -477,8 +598,30 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
               <MapPin size={16} />
             </button>
 
+            <button
+              onClick={startRecording}
+              disabled={transcribing}
+              className={cn(
+                "h-8 w-8 rounded-[7px] grid place-items-center shrink-0 transition-colors focus-visible:ring-2 focus-visible:ring-[#06B6D4]/30 focus-visible:outline-none",
+                recording
+                  ? "bg-rose-500/15 border border-rose-500/30 text-rose-400 animate-pulse"
+                  : "text-[#9aa39d] hover:text-[#e9ece9] hover:bg-[#181d1b]"
+              )}
+              aria-label={recording ? "Stop recording" : "Voice input"}
+              title={recording ? "Stop recording" : "Voice input"}
+            >
+              {transcribing ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : recording ? (
+                <Square size={13} className="fill-current" />
+              ) : (
+                <Mic size={16} />
+              )}
+            </button>
+
             <TextareaAutosize
               autoFocus={autoFocus}
+              ref={textareaRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onFocus={() => setFocused(true)}

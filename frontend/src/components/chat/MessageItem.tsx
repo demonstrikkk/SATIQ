@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Copy, Check, PanelRightOpen, Layers3, Maximize2, RefreshCw, Map } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Copy, Check, PanelRightOpen, Layers3, Maximize2, RefreshCw, Map, Volume2, VolumeX, Pencil } from "lucide-react";
 import { motion } from "framer-motion";
 import { useChatStore } from "@/store/chat.store";
 import type { Message } from "@/store/chat.store";
@@ -10,7 +10,7 @@ import { useWorkspaceStore } from "@/store/workspace.store";
 import { useMapStore } from "@/store/map.store";
 import { useExecutionStore } from "@/store/execution.store";
 import { ChatImageLightbox } from "@/components/imagery/ChatImageLightbox";
-import { simulateAnalysisQuery } from "@/mocks/mockStream";
+import { executeRealAnalysis } from "@/lib/analysisClient";
 import { toast } from "sonner";
 
 // SATIQ mark — 26px square 6px radius per satquery-ai.html .msg-avatar
@@ -58,6 +58,43 @@ export function MessageItem({ message }: { message: Message }) {
   const [copied, setCopied] = useState(false);
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null);
   const [imgLoaded, setImgLoaded] = useState<Record<string, boolean>>({});
+  const [speaking, setSpeaking] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {}
+    };
+  }, []);
+
+  // ── Text-to-speech (client Web Speech API) for assistant answers ──
+  const speak = () => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      toast.message("Text-to-speech not supported in this browser");
+      return;
+    }
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+    const text = message.content
+      .replace(/```chart[\s\S]*?```/gi, " ")
+      .replace(/```[\s\S]*?```/gi, " ")
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+      .replace(/[#>*_`-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1;
+    u.pitch = 1;
+    u.onend = () => setSpeaking(false);
+    u.onerror = () => setSpeaking(false);
+    setSpeaking(true);
+    window.speechSynthesis.speak(u);
+  };
 
   // ── User message — A3 motion: fade + y6, 0.2s
   if (isUser) {
@@ -138,6 +175,12 @@ export function MessageItem({ message }: { message: Message }) {
                 {message.content}
               </div>
             </div>
+            <ActionChip
+              onClick={() => useChatStore.getState().setComposerPrefill(message.content)}
+              icon={<Pencil size={11} />}
+            >
+              Edit
+            </ActionChip>
           </div>
           <div className="mt-0.5 shrink-0">
             <UserAvatarMark />
@@ -191,9 +234,9 @@ export function MessageItem({ message }: { message: Message }) {
     let lastUser: Message | null = null;
     for (let i = idx - 1; i >= 0; i--) { if (msgs[i].role === "user") { lastUser = msgs[i]; break; } }
     if (!lastUser) { toast.error("No source message to regenerate"); return; }
-    // re-queue same query via simulateAnalysisQuery (keeps 100% mock)
+    // re-run the same query through the real agentic pipeline
     useChatStore.getState().addMessage({ id: Date.now().toString(), role: "user", content: lastUser.content, contexts: lastUser.contexts ?? [] });
-    simulateAnalysisQuery(lastUser.content, lastUser.contexts ?? []);
+    void executeRealAnalysis(lastUser.content, (lastUser.contexts ?? []) as any).catch((e) => console.error("[analysis]", e));
     toast.success("Regenerating…");
   };
 
@@ -258,6 +301,7 @@ export function MessageItem({ message }: { message: Message }) {
               markdownContent={message.content}
               isStreaming={streaming}
               thinkingSteps={thinkingSteps}
+              modelLabel={message.model}
             />
           ) : (
             <MessageCardSkeleton />
@@ -271,6 +315,12 @@ export function MessageItem({ message }: { message: Message }) {
                 icon={copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
               >
                 {copied ? "Copied" : "Copy"}
+              </ActionChip>
+              <ActionChip
+                onClick={speak}
+                icon={speaking ? <VolumeX size={11} className="text-[#06B6D4]" /> : <Volume2 size={11} />}
+              >
+                {speaking ? "Stop" : "Listen"}
               </ActionChip>
               <ActionChip onClick={openInspector} icon={<PanelRightOpen size={11} />}>
                 Inspect on map
@@ -298,7 +348,7 @@ export function MessageItem({ message }: { message: Message }) {
                   onClick={() => {
                     const { addMessage } = useChatStore.getState();
                     addMessage({ id: Date.now().toString(), role: "user", content: q });
-                    simulateAnalysisQuery(q, []);
+                    void executeRealAnalysis(q, []).catch((e) => console.error("[analysis]", e));
                     if (isGenerating) toast.message("Queued — will run after current");
                   }}
                   className="rounded-full border border-slate-700/40 bg-[#0B1120] px-3 py-1.5 text-xs text-slate-300 hover:bg-[#141F30] hover:text-white hover:border-slate-600/50 transition-colors text-left max-w-full truncate"

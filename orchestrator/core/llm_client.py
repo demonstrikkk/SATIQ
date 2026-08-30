@@ -17,6 +17,11 @@ try:
 except Exception:
     OpenAI = None  # type: ignore
 
+try:
+    from openai import AsyncOpenAI  # type: ignore
+except Exception:
+    AsyncOpenAI = None  # type: ignore
+
 from .config import get_settings
 try:
     from orchestrator.core.circuit_breaker import qwen_circuit  # type: ignore
@@ -92,6 +97,28 @@ def is_mock_mode() -> bool:
         return True
     return False
 
+def _has_any_groq_key() -> bool:
+    try:
+        s = get_settings()
+        keys = [
+            getattr(s, "groq_api_key", ""),
+            getattr(s, "groq_api_key1", ""),
+            getattr(s, "groq_api_key2", ""),
+            os.getenv("GROQ_API_KEY", ""),
+            os.getenv("GROQ_API_KEY1", ""),
+            os.getenv("GROQ_API_KEY2", ""),
+        ]
+        for k in keys:
+            if k and k.strip():
+                return True
+        # also mistral counts as non-mock llm
+        mk = (getattr(s, "mistral_api_key", "") or os.getenv("MISTRAL_API_KEY", "") or "").strip()
+        if mk:
+            return True
+        return False
+    except Exception:
+        return False
+
 def resolve_provider() -> Provider:
     # circuit breaker gate (§2.5 audit fix: at llm_client level)
     try:
@@ -109,16 +136,17 @@ def resolve_provider() -> Provider:
     if prov == "local":
         return "local" if has_local_qwen_capability() else "mock"
     if prov == "groq":
-        return "groq" if s.groq_api_key else "mock"
+        return "groq" if _has_any_groq_key() else "mock"
     if is_mock_mode():
         return "mock"
     if has_local_qwen_capability():
         return "local"
-    if s.groq_api_key:
+    if _has_any_groq_key():
         return "groq"
     return "mock"
 
 def get_sync_client():
+    # Legacy entry — now distributes across GROQ1/2. Use role-specific get_sync_client_for_role for explicit distribution.
     prov = resolve_provider()
     s = get_settings()
     if prov == "mock":
@@ -132,11 +160,14 @@ def get_sync_client():
         except Exception:
             return None, "mock"
     if prov == "groq":
-        if OpenAI is None or not s.groq_api_key:
+        if OpenAI is None or not _has_any_groq_key():
+            return None, "mock"
+        # distribute: round-robin across available groq keys
+        key = _pick_groq_key("generic")
+        if not key:
             return None, "mock"
         try:
-            # Groq needs short timeout to fallback quickly to mock if slow
-            cli = OpenAI(base_url=s.groq_base_url, api_key=s.groq_api_key, timeout=8)  # type: ignore
+            cli = OpenAI(base_url=s.groq_base_url, api_key=key, timeout=8, max_retries=1)  # type: ignore
             return cli, "groq"
         except Exception:
             return None, "mock"
@@ -146,9 +177,214 @@ def _groq_model_name() -> str:
     s = get_settings()
     return s.groq_model.strip()
 
-def _groq_router_model_name() -> str:
+
+def get_async_client():
+    """Async OpenAI-compatible client for streaming (Groq/Local). Legacy — distributes."""
+    prov = resolve_provider()
     s = get_settings()
-    return getattr(s, "groq_router_model", "llama-3.1-8b-instant").strip() or "llama-3.1-8b-instant"
+    if prov == "mock":
+        return None, "mock"
+    if prov == "local":
+        if AsyncOpenAI is None:
+            return None, "mock"
+        try:
+            cli = AsyncOpenAI(base_url=s.qwen_base_url, api_key=s.qwen_api_key, timeout=6)  # type: ignore
+            return cli, "local"
+        except Exception:
+            return None, "mock"
+    if prov == "groq":
+        if AsyncOpenAI is None or not _has_any_groq_key():
+            return None, "mock"
+        key = _pick_groq_key("generic_async")
+        if not key:
+            return None, "mock"
+        try:
+            cli = AsyncOpenAI(base_url=s.groq_base_url, api_key=key, timeout=8, max_retries=1)  # type: ignore
+            return cli, "groq"
+        except Exception:
+            return None, "mock"
+    return None, "mock"
+
+def _groq_router_model_name() -> str:
+    # 2026-08 Groq deprecations: llama-3.1-8b-instant + llama-3.3-70b retired 08/16/26
+    # Recommended replacements: openai/gpt-oss-20b (for 8B) and openai/gpt-oss-120b/qwen3.6-27b (for 70B)
+    # Use gpt-oss-20b for router/planner — 500 tps, no thinking, ~0.6s
+    s = get_settings()
+    # respect env if set to a non-deprecated model, otherwise force gpt-oss-20b
+    raw = (getattr(s, "groq_router_model", "") or "").strip()
+    deprecated = {"llama-3.1-8b-instant","llama-3.3-70b-versatile","meta-llama/llama-3.1-8b-instant","llama-3.3-70b-versatile"}
+    if raw and raw not in deprecated and "llama-3.1" not in raw and "llama-3.3" not in raw:
+        # groq/compound-mini is still valid; keep if explicitly set
+        if raw in ("groq/compound-mini","groq/compound","openai/gpt-oss-20b","openai/gpt-oss-120b","qwen/qwen3.6-27b"):
+            return raw
+    return "openai/gpt-oss-20b"
+
+# ---------- multi-key distributor (2 Groq + 1 Mistral) ----------
+import threading as _threading  # noqa: E402
+
+_groq_rr_lock = _threading.Lock()
+_groq_rr_idx = 0
+_mistral_rr_lock = _threading.Lock()
+_mistral_rr_idx = 0
+
+def _all_groq_keys() -> list[str]:
+    """Collect all configured Groq keys (supports GROQ_API_KEY, GROQ_API_KEY1, GROQ_API_KEY2)."""
+    s = get_settings()
+    raw: list[str] = []
+    for cand in [
+        getattr(s, "groq_api_key", ""),
+        getattr(s, "groq_api_key1", ""),
+        getattr(s, "groq_api_key2", ""),
+        os.getenv("GROQ_API_KEY", ""),
+        os.getenv("GROQ_API_KEY1", ""),
+        os.getenv("GROQ_API_KEY2", ""),
+    ]:
+        if cand and cand.strip() and cand.strip() not in raw:
+            raw.append(cand.strip())
+    return raw
+
+def _has_mistral() -> bool:
+    s = get_settings()
+    k = (getattr(s, "mistral_api_key", "") or os.getenv("MISTRAL_API_KEY", "") or "").strip()
+    if not k or len(k) <= 8:
+        return False
+    # psbn... is a placeholder/test key, not a real Mistral key — treat as absent
+    if k.startswith("psbn") or "16KkP6YovZUL" in k:
+        return False
+    return True
+
+def _get_mistral_key() -> str:
+    s = get_settings()
+    return (getattr(s, "mistral_api_key", "") or os.getenv("MISTRAL_API_KEY", "") or "").strip()
+
+def _mistral_model_name() -> str:
+    s = get_settings()
+    raw = (getattr(s, "mistral_model", "") or os.getenv("MISTRAL_MODEL", "") or "mistral-small-latest").strip()
+    return raw or "mistral-small-latest"
+
+def _pick_groq_key(role: str = "") -> str:
+    global _groq_rr_idx
+    keys = _all_groq_keys()
+    if not keys:
+        return ""
+    # deterministic per role to spread load
+    if role == "router" and len(keys) >= 1:
+        return keys[0]
+    if role == "planner" and len(keys) >= 2:
+        return keys[1]
+    if role == "composer":
+        # composer prefers Mistral; groq fallback uses round-robin
+        with _groq_rr_lock:
+            k = keys[_groq_rr_idx % len(keys)]
+            _groq_rr_idx += 1
+            return k
+    if role == "transcribe":
+        return keys[0]
+    # default round-robin
+    with _groq_rr_lock:
+        k = keys[_groq_rr_idx % len(keys)]
+        _groq_rr_idx += 1
+        return k
+
+def _has_any_llm_key() -> bool:
+    return bool(_all_groq_keys() or _has_mistral())
+
+def _make_groq_sync_client(api_key: str):
+    s = get_settings()
+    if not api_key or OpenAI is None:
+        return None
+    try:
+        return OpenAI(base_url=s.groq_base_url, api_key=api_key, timeout=8, max_retries=1)  # type: ignore
+    except Exception:
+        return None
+
+def _make_groq_async_client(api_key: str):
+    s = get_settings()
+    if not api_key or AsyncOpenAI is None:
+        return None
+    try:
+        return AsyncOpenAI(base_url=s.groq_base_url, api_key=api_key, timeout=8, max_retries=1)  # type: ignore
+    except Exception:
+        return None
+
+def _make_mistral_sync_client(api_key: str):
+    s = get_settings()
+    if not api_key or OpenAI is None:
+        return None
+    try:
+        return OpenAI(base_url=getattr(s, "mistral_base_url", "https://api.mistral.ai/v1"), api_key=api_key, timeout=10, max_retries=1)  # type: ignore
+    except Exception:
+        return None
+
+def _make_mistral_async_client(api_key: str):
+    s = get_settings()
+    if not api_key or AsyncOpenAI is None:
+        return None
+    try:
+        return AsyncOpenAI(base_url=getattr(s, "mistral_base_url", "https://api.mistral.ai/v1"), api_key=api_key, timeout=10, max_retries=1)  # type: ignore
+    except Exception:
+        return None
+
+def get_sync_client_for_role(role: str):
+    """Role-aware sync client: router→GROQ1, planner→GROQ2, composer→Mistral→GROQ."""
+    prov = resolve_provider()
+    if prov == "mock":
+        return None, "mock", ""
+    s = get_settings()
+    if role == "composer" and _has_mistral():
+        cli = _make_mistral_sync_client(_get_mistral_key())
+        if cli is not None:
+            return cli, "mistral", _mistral_model_name()
+    # groq for this role
+    key = _pick_groq_key(role)
+    if key:
+        cli = _make_groq_sync_client(key)
+        if cli is not None:
+            model = _groq_router_model_name() if role in ("router", "planner") else _groq_model_name()
+            if role == "composer":
+                model = _groq_model_name()
+            return cli, "groq", model
+    # fallback to any groq key
+    keys = _all_groq_keys()
+    for k in keys:
+        if k == key:
+            continue
+        cli = _make_groq_sync_client(k)
+        if cli is not None:
+            model = _groq_router_model_name() if role in ("router", "planner") else _groq_model_name()
+            return cli, "groq", model
+    return None, "mock", ""
+
+def get_async_client_for_role(role: str):
+    """Role-aware async client."""
+    prov = resolve_provider()
+    if prov == "mock":
+        return None, "mock", ""
+    if role == "composer" and _has_mistral():
+        cli = _make_mistral_async_client(_get_mistral_key())
+        if cli is not None:
+            return cli, "mistral", _mistral_model_name()
+    key = _pick_groq_key(role)
+    if key:
+        cli = _make_groq_async_client(key)
+        if cli is not None:
+            model = _groq_router_model_name() if role in ("router", "planner") else _groq_model_name()
+            if role == "composer":
+                model = _groq_model_name()
+            return cli, "groq", model
+    keys = _all_groq_keys()
+    for k in keys:
+        if k == key:
+            continue
+        cli = _make_groq_async_client(k)
+        if cli is not None:
+            model = _groq_router_model_name() if role in ("router", "planner") else _groq_model_name()
+            return cli, "groq", model
+    return None, "mock", ""
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return "429" in msg or "rate" in msg or "too many" in msg or "quota" in msg
 
 def _dummy_router(query: str, assets: list | None = None) -> Dict[str, Any]:
     q = query.lower()
@@ -212,10 +448,47 @@ def _strip_think(text: str) -> str:
     else:
         # unclosed: remove from <think> to end, but keep final JSON after it if present via last JSON heuristic later
         # keep only after last "Final string:" or last "{" that is task_type JSON
-        # For now just remove up to last occurrence of '{"task_type"'
         # We'll handle extraction below, so keep whole text for now
         pass
     return text.strip()
+
+
+async def _strip_think_tokens(stream):
+    """Async generator: drop model <think>…</think> reasoning from a token stream.
+
+    Models like Qwen3 emit chain-of-thought wrapped in <think> tags. We must NOT
+    surface that as the answer. Handles tags split across chunk boundaries.
+    """
+    buf = ""
+    in_think = False
+    async for tok in stream:
+        buf += tok
+        while True:
+            if in_think:
+                idx = buf.find("</think>")
+                if idx == -1:
+                    buf = ""  # still inside thinking — discard
+                    break
+                buf = buf[idx + 8:]
+                in_think = False
+                continue  # re-process remainder
+            idx = buf.find("<think>")
+            if idx == -1:
+                # no open tag yet; flush all but keep a tail in case "<think" is split
+                if len(buf) > 8:
+                    yield buf[:-8]
+                    buf = buf[-8:]
+                break
+            out = buf[:idx]
+            buf = buf[idx + 7:]
+            in_think = True
+            if out:
+                yield out
+            # re-process remainder inside loop
+    if buf and not in_think:
+        buf = buf.replace("<think>", "").replace("</think>", "")
+        if buf:
+            yield buf
 
 def _extract_json(text: str) -> str | None:
     import re as _re
@@ -260,6 +533,16 @@ def _extract_json(text: str) -> str | None:
         return text[start:end]
     return None
 
+def _call_with_timeout(fn, timeout_s: float = 4.0):
+    """Run sync OpenAI call with hard timeout — Groq qwen thinking can hold connection open past client timeout."""
+    import concurrent.futures as _cf
+    with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(fn)
+        try:
+            return fut.result(timeout=timeout_s)
+        except _cf.TimeoutError:
+            raise TimeoutError(f"LLM call timed out after {timeout_s}s")
+
 def call_qwen_router(query: str, assets: list | None = None) -> Dict[str, Any]:
     prov = resolve_provider()
     # mock path — no network
@@ -267,29 +550,37 @@ def call_qwen_router(query: str, assets: list | None = None) -> Dict[str, Any]:
         base = _dummy_router(query, assets)
         return {"task_type": base["task_type"], **base, "_mock": True, "_mode": "mock_qwen_3.5_9b", "_provider": "mock"}
 
-    # local or groq path
+    # local or groq/mistral path — distributed keys (router → GROQ_KEY1)
     s = get_settings()
-    cli, actual_prov = get_sync_client()
+    cli, actual_prov, _hint = get_sync_client_for_role("router")
     if cli is None:
         base = _dummy_router(query, assets)
         base["_mock"] = True
         base["_fallback"] = "client_unavailable"
         base["_provider"] = "mock"
         return base
-    # Groq fast path: single-word classification using llama (no thinking, 0.3s)
-    if actual_prov == "groq":
+    # Groq/Mistral fast path: single-word classification (no thinking, ~0.3s)
+    if actual_prov in ("groq", "mistral"):
+        # router always uses groq/compound-mini — if mistral was picked, force groq
+        if actual_prov == "mistral":
+            # retry with explicit groq key for router
+            gkey = _pick_groq_key("router")
+            cli = _make_groq_sync_client(gkey) if gkey else cli
+            actual_prov = "groq"
         model = _groq_router_model_name()
         prompt = f"""Classify query into one word: vqa, grounding, change_vqa, optical_sar_fusion.
 Query: "{query}"
 Assets modalities: {[a.get('modality') for a in (assets or [])]}
 Answer with one word only."""
-        try:
-            resp = cli.chat.completions.create(  # type: ignore
+        def _try_router(c):
+            return _call_with_timeout(lambda: c.chat.completions.create(  # type: ignore
                 model=model,
                 messages=[{"role":"user","content": prompt}],
                 temperature=0,
                 max_tokens=10,
-            )
+            ), timeout_s=4.0)
+        try:
+            resp = _try_router(cli)
             content = _strip_think(resp.choices[0].message.content or "")
             import re as _re
             m = _re.search(r"\b(vqa|grounding|change_vqa|optical_sar_fusion)\b", content.lower())
@@ -298,12 +589,29 @@ Answer with one word only."""
                 except Exception: pass
             if m:
                 tt = m.group(1)
-                return {"task_type": tt, "reasoning": f"Groq qwen {model} single-word", "confidence": 0.90, "_provider": "groq", "_model": model}
+                return {"task_type": tt, "reasoning": f"Groq {model} single-word (key1)", "confidence": 0.90, "_provider": "groq", "_model": model}
             base = _dummy_router(query, assets)
             base["_provider"] = "groq"
             base["_fallback"] = "no_word_found"
             return base
         except Exception as e:
+            # rate-limit fallback: try other Groq key
+            if _is_rate_limit_error(e):
+                for k in _all_groq_keys():
+                    if k == _pick_groq_key("router"):
+                        continue
+                    cli2 = _make_groq_sync_client(k)
+                    if cli2 is None:
+                        continue
+                    try:
+                        resp = _call_with_timeout(lambda: cli2.chat.completions.create(model=model, messages=[{"role":"user","content": prompt}], temperature=0, max_tokens=10), timeout_s=4.0)  # type: ignore
+                        content = _strip_think(resp.choices[0].message.content or "")
+                        import re as _re2
+                        m2 = _re2.search(r"\b(vqa|grounding|change_vqa|optical_sar_fusion)\b", content.lower())
+                        if m2:
+                            return {"task_type": m2.group(1), "reasoning": f"Groq {model} single-word fallback key", "confidence": 0.88, "_provider": "groq", "_model": model}
+                    except Exception:
+                        continue
             print(f"[qwen router fallback groq fast] {e}")
             if qwen_circuit is not None:
                 try: qwen_circuit.record_failure()
@@ -377,23 +685,33 @@ Task: {task_type}
 Query: "{query}"
 Assets: {assets or []}
 Return JSON only with keys: task_type, reasoning, required_assets (list), fusion_needed (bool), temporal_needed (bool), confidence (0-1)"""
-    cli, actual_prov = get_sync_client()
+    cli, actual_prov, model_hint = get_sync_client_for_role("planner")
     if cli is None:
         out = _dummy_planner(query, task_type)
         out["_mock"] = True
         out["_provider"] = "mock"
         return out
-    model = s.qwen_model if actual_prov == "local" else _groq_model_name()
+    # Planner is lightweight → GROQ_KEY2 + groq/compound-mini (was ~97s on 27B)
+    model = s.qwen_model if actual_prov == "local" else _groq_router_model_name()
+    # ensure mistral never used for planner (keep groq)
+    if actual_prov == "mistral":
+        gkey = _pick_groq_key("planner")
+        cli = _make_groq_sync_client(gkey) if gkey else cli
+        actual_prov = "groq"
+        model = _groq_router_model_name()
     try:
         resp_kwargs = {
             "model": model,
             "messages": [{"role":"user","content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 800 if actual_prov == "groq" else 384,
+            "max_tokens": 300 if actual_prov == "groq" else 384,
+            **({"extra_body": {"reasoning_effort": "low"}} if actual_prov == "groq" and "qwen" in model.lower() else {}),  # type: ignore
         }
         if actual_prov == "local":
             resp_kwargs["response_format"] = {"type":"json_object"}  # type: ignore
-        resp = cli.chat.completions.create(**resp_kwargs)  # type: ignore
+        def _call_planner(c):
+            return _call_with_timeout(lambda: c.chat.completions.create(**resp_kwargs), timeout_s=5.0)  # type: ignore
+        resp = _call_planner(cli)
         raw = resp.choices[0].message.content or ""
         if qwen_circuit is not None:
             try: qwen_circuit.record_success()
@@ -421,6 +739,25 @@ Return JSON only with keys: task_type, reasoning, required_assets (list), fusion
         out["_provider"] = actual_prov
         return out
     except Exception as e:
+        if _is_rate_limit_error(e):
+            for k in _all_groq_keys():
+                if k == _pick_groq_key("planner"):
+                    continue
+                cli2 = _make_groq_sync_client(k)
+                if cli2 is None:
+                    continue
+                try:
+                    resp = cli2.chat.completions.create(**{**resp_kwargs, "extra_body": {"reasoning_effort": "low"}} if "qwen" in model.lower() else resp_kwargs)  # type: ignore
+                    raw = resp.choices[0].message.content or ""
+                    jstr = _extract_json(raw)
+                    if jstr:
+                        data = json.loads(jstr)
+                        data.setdefault("task_type", task_type)
+                        data["_provider"] = "groq"
+                        data["_model"] = model + " (fallback key)"
+                        return data
+                except Exception:
+                    continue
         print(f"[qwen planner fallback {actual_prov}] {e}")
         if qwen_circuit is not None:
             try: qwen_circuit.record_failure()
@@ -437,33 +774,168 @@ def call_qwen_composer(query: str, task_output: Dict[str,Any], trace: list) -> s
         base = task_output.get("answer_text","")
         suffix = " • circuit open — degraded mode (mock)" if (qwen_circuit is not None and qwen_circuit.is_open()) else " • Mocked Qwen 3.5 9B composer (offline heuristic) — replace with Ollama/Groq when enabled"
         return base + f"\n\n> Confidence: {task_output.get('confidence', task_output.get('per_modality_confidence',{}).get('fused',0.82))}{suffix}"
-    s = get_settings()
-    prompt = f"""You are Satiq's response composer. Fuse tool outputs into final answer.
+    # include recent conversation for context (last 2 turns)
+    hist_snip = ""
+    try:
+        from orchestrator.services.conversation import load_history
+        hist = load_history(task_output.get("session_id") or "", n=2)
+        if hist:
+            hist_snip = "\nRecent conversation:\n" + "\n".join([f"- Q: {h.get('query','')[:120]} -> {h.get('task_output',{}).get('answer_text','')[:120]}" for h in hist[-2:]])
+    except Exception:
+        hist_snip = ""
+    prompt = f"""You are Satiq's geospatial response composer — you decide the entire presentation.
+
 Query: {query}
-Task output: {json.dumps(task_output)[:2000]}
+Task type: {task_output.get('task','')}
+Task output: {json.dumps(task_output)[:2200]}
 Trace: {json.dumps(trace)[-800:]}
-Write concise markdown answer with > confidence, bbox if present, and evidence summary. Keep under 400 words."""
-    cli, actual_prov = get_sync_client()
+{hist_snip}
+Conversation images: {task_output.get('image_id') or task_output.get('optical_image_id') or task_output.get('image_ids') or ''}
+
+You control what the frontend renders. Decide per-response what to show:
+
+- Text: always, but be specific to the query — DO NOT return generic water-body copy when the query asks about agriculture/cattle/caves. Use the task_output's detected_label/sector/bbox precisely. If the label is agricultural field, say so; if no caves, say none.
+- BBox: include as `| BBox | [x,y,x,y] |` + `![bbox overlay](bbox://{{xyxy}})` ONLY for grounding tasks where bbox is present and relevant.
+- Chart: ONLY include a ```chart block if task_output has meaningful multi-value data (per-category, per-modality). Do NOT force a donut for simple yes/no. If chart_spec is present in task_output, you may include it as ```chart\\n{{json}}\\n``` ; otherwise omit.
+- Map/Image: if the user uploaded images, reference them with markdown `![uploaded image](image://{{image_id}})` so the frontend can render them inline.
+- Keep under 350 words, grounded, no hallucinations. Cite confidence.
+
+IMPORTANT: Output ONLY the final markdown. No <think> tags, no reasoning preamble.
+"""
+    cli, actual_prov, model_hint = get_sync_client_for_role("composer")
     if cli is None:
         if qwen_circuit is not None:
             try: qwen_circuit.record_failure()
             except Exception: pass
         return task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Composed locally (Qwen offline)"
-    model = s.qwen_model if actual_prov == "local" else _groq_model_name()
+    # composer prefers Mistral (offloads Groq), fallback Groq; local stays local
+    # 2026-08: qwen 27b thinking is 90-230s even with reasoning_effort low — force fast gpt-oss-20b for real-time UX
+    model = model_hint if actual_prov in ("mistral", "groq") else (s.qwen_model if actual_prov == "local" else model_hint)
+    if "qwen" in model.lower() or "llama-3.1" in model.lower() or "llama-3.3" in model.lower():
+        model = "openai/gpt-oss-20b"
     try:
         resp = cli.chat.completions.create(
             model=model,
             messages=[{"role":"user","content": prompt}],
             temperature=0.2,
-            max_tokens=600,
+            max_tokens=500,
         )
         if qwen_circuit is not None:
             try: qwen_circuit.record_success()
             except Exception: pass
-        return resp.choices[0].message.content or task_output.get("answer_text","")
+        return _strip_think(resp.choices[0].message.content or task_output.get("answer_text",""))
     except Exception as e:
-        print(f"[qwen composer fallback {actual_prov}] {e}")
+        if _is_rate_limit_error(e):
+            # fallback across remaining keys
+            tried = {model_hint}
+            for k in _all_groq_keys():
+                # skip the key we just used for groq/mistral groq fallback
+                cli2 = _make_groq_sync_client(k)
+                if cli2 is None:
+                    continue
+                try:
+                    # fallback also uses fast model
+                    fb_model = "openai/gpt-oss-20b"
+                    resp2 = cli2.chat.completions.create(model=fb_model, messages=[{"role":"user","content": prompt}], temperature=0.2, max_tokens=500)  # type: ignore
+                    return _strip_think(resp2.choices[0].message.content or task_output.get("answer_text",""))
+                except Exception:
+                    continue
+            if _has_mistral():
+                cli_m = _make_mistral_sync_client(_get_mistral_key())
+                if cli_m is not None and actual_prov != "mistral":
+                    try:
+                        resp3 = cli_m.chat.completions.create(model=_mistral_model_name(), messages=[{"role":"user","content": prompt}], temperature=0.2, max_tokens=500)  # type: ignore
+                        return _strip_think(resp3.choices[0].message.content or task_output.get("answer_text",""))
+                    except Exception:
+                        pass
+        print(f"[qwen composer fallback {actual_prov}/{model}] {e}")
         if qwen_circuit is not None:
             try: qwen_circuit.record_failure()
             except Exception: pass
-        return task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Mocked Qwen (fallback {actual_prov})"
+        return task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Mocked ({actual_prov} fallback)"
+
+
+async def call_qwen_composer_stream(query: str, task_output: Dict[str,Any], trace: list):
+    """Stream the composer answer token-by-token. Async generator yielding text chunks.
+
+    - mock provider: yields the full heuristic as a single chunk.
+    - groq/local: yields real deltas as they arrive (true real-time).
+    - any error: yields a single fallback chunk built from task_output so the
+      answer is always delivered (never leaves the client with a partial stream).
+    """
+    prov = resolve_provider()
+    if prov == "mock":
+        base = task_output.get("answer_text","")
+        suffix = " • Mocked Qwen 3.5 9B composer (offline heuristic) — replace with Ollama/Groq when enabled"
+        yield base + f"\n\n> Confidence: {task_output.get('confidence', task_output.get('per_modality_confidence',{}).get('fused',0.82))}{suffix}"
+        return
+    # history snippet for composer streaming
+    hist_snip_s = ""
+    try:
+        from orchestrator.services.conversation import load_history as _lh
+        hist_s = _lh(task_output.get("session_id") or "", n=2)
+        if hist_s:
+            hist_snip_s = "\nRecent conversation:\n" + "\n".join([f"- Q: {h.get('query','')[:120]} -> {h.get('task_output',{}).get('answer_text','')[:120]}" for h in hist_s[-2:]])
+    except Exception:
+        hist_snip_s = ""
+    prompt = f"""You are Satiq's geospatial response composer — you decide the entire presentation.
+
+Query: {query}
+Task type: {task_output.get('task','')}
+Task output: {json.dumps(task_output)[:2200]}
+Trace: {json.dumps(trace)[-800:]}
+{hist_snip_s}
+Conversation images: {task_output.get('image_id') or task_output.get('optical_image_id') or task_output.get('image_ids') or ''}
+
+You control what the frontend renders. Decide per-response what to show:
+
+- Text: always, be specific — use detected_label/sector/bbox from task_output; do NOT hallucinate water when query is agriculture/cattle/caves.
+- BBox: include `| BBox | [x,y,x,y] |` + `![bbox overlay](bbox://{{xyxy}})` ONLY for grounding with bbox.
+- Chart: ONLY include ```chart block when task_output has multi-value data (per-category, per-modality). Omit for yes/no or single numeric.
+- Map/Image: reference uploaded images as `![uploaded image](image://{{image_id}})` when relevant.
+- Keep under 350 words, cite confidence. No <think> tags.
+"""
+    cli, actual_prov, model_hint = get_async_client_for_role("composer")
+    if cli is None:
+        yield task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Composed locally (Qwen offline)"
+        return
+    model = model_hint if actual_prov in ("mistral", "groq") else (s.qwen_model if actual_prov == "local" else model_hint)
+    try:
+        # force fast model if qwen/llama deprecated
+        if "qwen" in model.lower() or "llama-3.1" in model.lower() or "llama-3.3" in model.lower():
+            model = "openai/gpt-oss-20b"
+        stream = await cli.chat.completions.create(
+            model=model,
+            messages=[{"role":"user","content": prompt}],
+            temperature=0.2,
+            max_tokens=500,
+            stream=True,
+        )
+        async def _raw_tokens():
+            async for chunk in stream:
+                d = chunk.choices[0].delta.content if (chunk.choices and chunk.choices[0].delta) else None
+                if d:
+                    yield d
+        async for tok in _strip_think_tokens(_raw_tokens()):
+            yield tok
+    except Exception as e:
+        # rate-limit → try fallback groq keys before giving up
+        if _is_rate_limit_error(e):
+            for k in _all_groq_keys():
+                cli2 = _make_groq_async_client(k)
+                if cli2 is None:
+                    continue
+                try:
+                    stream2 = await cli2.chat.completions.create(model="openai/gpt-oss-20b", messages=[{"role":"user","content": prompt}], temperature=0.2, max_tokens=500, stream=True)  # type: ignore
+                    async def _raw2():
+                        async for chunk in stream2:
+                            d = chunk.choices[0].delta.content if (chunk.choices and chunk.choices[0].delta) else None
+                            if d:
+                                yield d
+                    async for tok in _strip_think_tokens(_raw2()):
+                        yield tok
+                    return
+                except Exception:
+                    continue
+        print(f"[qwen composer stream fallback {actual_prov}/{model}] {e}")
+        yield task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Mocked ({actual_prov} fallback)"

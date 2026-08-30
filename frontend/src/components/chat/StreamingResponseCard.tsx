@@ -12,12 +12,14 @@ export const StreamingResponseCard = memo(function StreamingResponseCard({
   markdownContent,
   isStreaming,
   thinkingSteps,
+  modelLabel,
 }: {
   thinking?: string;
   thinkingStreaming?: boolean;
   markdownContent: string;
   isStreaming?: boolean;
   thinkingSteps?: ThinkingStep[];
+  modelLabel?: string;
 }) {
   const [showThinking, setShowThinking] = useState(true);
   const [keepOpen, setKeepOpen] = useState(false);
@@ -28,10 +30,10 @@ export const StreamingResponseCard = memo(function StreamingResponseCard({
   const bufferedMarkdown = useTokenBuffer(markdownContent, 14, !!isStreaming);
 
   useEffect(() => {
-    if (!thinkingStreaming) return;
+    if (!thinkingStreaming && !isStreaming) return;
     const id = setInterval(() => setNow(Date.now()), 120);
     return () => clearInterval(id);
-  }, [thinkingStreaming]);
+  }, [thinkingStreaming, isStreaming]);
 
   // Auto-collapse thinking 800ms after completion per spec, unless user kept open
   useEffect(() => {
@@ -108,7 +110,7 @@ export const StreamingResponseCard = memo(function StreamingResponseCard({
           >
             <span className="flex items-center gap-2">
               <span className={`w-2 h-2 rounded-full shrink-0 ${thinkingStreaming ? 'bg-[#F59E0B] animate-pulse' : 'bg-[#22C55E]'}`} style={thinkingStreaming ? { boxShadow: "0 0 6px rgba(245,158,11,0.5)" } : { boxShadow: "0 0 6px rgba(34,197,94,0.5)" }} />
-              {thinkingStreaming ? `Thinking — Qwen 3.5 9B… ${Math.round((now - startedAt)/100)/10}s · ${bufferedThinking.length} chars` : `Thought process (${thinkingSteps?.length ?? '—'} steps) · ${bufferedThinking.length} chars`}
+              {thinkingStreaming ? `Thinking — ${modelLabel ?? "Qwen 3.5 9B"}… ${Math.round((now - startedAt)/100)/10}s · ${bufferedThinking.length} chars` : `Thought process (${thinkingSteps?.length ?? '—'} steps) · ${bufferedThinking.length} chars`}
             </span>
             <span className="flex items-center gap-1 text-[11px] text-slate-500 font-medium">
               {showThinking ? <><ChevronUp size={12} /> Hide</> : <><ChevronDown size={12} /> View trace</>}

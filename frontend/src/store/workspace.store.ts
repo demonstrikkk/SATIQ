@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { fetchSessions, createSessionBackend, updateSessionBackend, deleteSessionBackend } from "@/lib/sessionSync";
 
 export interface PersistedSession {
   id: string;
@@ -31,6 +32,7 @@ interface WorkspaceState {
   renameSession: (id: string, title: string) => void;
   deleteSession: (id: string) => void;
   touchSession: (id: string) => void;
+  initSessions: () => Promise<void>;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()(
@@ -63,12 +65,17 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         try {
           localStorage.setItem(`satiq:session:${id}:messages`, JSON.stringify([]));
         } catch {}
+        // mirror to backend (best-effort)
+        void createSessionBackend(session);
         return id;
       },
-      renameSession: (id, title) =>
+      renameSession: (id, title) => {
         set((s) => ({
           sessions: s.sessions.map((x) => (x.id === id ? { ...x, title: title.slice(0, 60), updatedAt: new Date().toISOString() } : x)),
-        })),
+        }));
+        const cur = get().sessions.find((x) => x.id === id);
+        void updateSessionBackend(id, { name: title.slice(0, 60), category: cur?.category });
+      },
       deleteSession: (id) =>
         set((s) => {
           const next = s.sessions.filter((x) => x.id !== id);
@@ -76,12 +83,24 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           try {
             localStorage.removeItem(`satiq:session:${id}:messages`);
           } catch {}
+          void deleteSessionBackend(id);
           return { sessions: next, activeAnalysisId: active };
         }),
       touchSession: (id) =>
         set((s) => ({
           sessions: s.sessions.map((x) => (x.id === id ? { ...x, updatedAt: new Date().toISOString() } : x)),
         })),
+      initSessions: async () => {
+        // Pull canonical sessions from the backend; fall back silently to local only.
+        const remote = await fetchSessions();
+        if (remote && remote.length > 0) {
+          const current = get().activeAnalysisId;
+          set((s) => ({
+            sessions: remote,
+            activeAnalysisId: current && remote.find((x) => x.id === current) ? current : (remote[0]?.id ?? null),
+          }));
+        }
+      },
     }),
     {
       name: "satiq-workspace-v1",

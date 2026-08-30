@@ -31,6 +31,7 @@ from orchestrator.core.metrics import snapshot as metrics_snapshot, record_reque
 from orchestrator.core.structured_logging import log_node as structured_log_node
 from orchestrator.services.vision_encoder_service import health_live as vision_health_live, health_ready as vision_health_ready
 from orchestrator.services.fusion_llm_service import health_live as fusion_health_live, health_ready as fusion_health_ready
+from orchestrator.core.events import register_broadcaster
 
 app = FastAPI(title="Satiq Orchestrator", version="1.0.0")
 
@@ -91,6 +92,10 @@ async def _broadcast(session_id: str, event: str, payload: Dict[str,Any] | None 
     # update in-memory
     if session_id in EXECUTIONS:
         EXECUTIONS[session_id].setdefault("events", []).append(msg)
+        # mark that live token streaming occurred (set by the composer node via emit),
+        # so run_pipeline knows NOT to re-chunk the already-streamed text.
+        if event == "answer_delta":
+            EXECUTIONS[session_id]["_streamed"] = True
         EXECUTIONS[session_id]["status"] = _status_from_event(event, EXECUTIONS[session_id].get("status","running"))
         if event in ("final_answer","query_completed","error","cancelled"):
             EXECUTIONS[session_id]["finished_at"] = time.time()
@@ -105,6 +110,10 @@ async def _broadcast(session_id: str, event: str, payload: Dict[str,Any] | None 
             await ws.send_json(msg)
         except Exception:
             pass
+
+
+# allow graph nodes to emit live events (e.g. streamed answer tokens) to clients
+register_broadcaster(_broadcast)
 
 def _status_from_event(event: str, cur: str) -> str:
     if event in ("error",):
@@ -137,7 +146,12 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
         state = new_state(session_id=session_id, query=query, assets=assets, image_ids=image_ids)
         # set initial status
         pipeline = get_pipeline()
-        # invoke LangGraph
+        # Create the assistant message BEFORE the pipeline runs so that the
+        # composer node's live `answer_delta` tokens (emitted during ainvoke)
+        # are captured by the UI bridge. Without this, every live token is
+        # dropped and the answer never reaches the chat.
+        await _broadcast(session_id, "composer_started", {"llm": _model})
+        # invoke LangGraph (router/planner emit thinking_delta; composer streams answer)
         result_state = await pipeline.ainvoke(state)  # type: ignore
 
         # extract trace to broadcast step-by-step for UI compatibility
@@ -174,27 +188,42 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
         conf = final.get("confidence") or result_state.get("confidence") or 0.82
         await _broadcast(session_id, "evidence_done", {"confidence": conf, "evidence_count": 1})
 
-        await _broadcast(session_id, "composer_started", {"llm":"qwen3.5-9b"})
-        # thinking delta — use trace
-        thinking = "; ".join([f"{s.get('agent')}:{s.get('status')}" for s in trace[-4:]])
-        await _broadcast(session_id, "thinking_delta", {"chunk": thinking or "Qwen 3.5 9B: fused evidence, composing answer"})
+        # Router/planner already streamed their real reasoning as thinking_delta
+        # during the pipeline run. Close the thinking block now.
         await _broadcast(session_id, "thinking_done")
 
-        # answer deltas — split final answer
+        # answer streaming — if the composer node already streamed tokens live
+        # (true real-time via Groq), do NOT re-chunk the main text (would
+        # duplicate). Only append the chart block + tabular evidence the node
+        # did not emit during streaming.
         answer_text = final.get("answer_text","")
-        # if chart, emit as delta too
         chart = final.get("chart_spec")
+        chart_block = ""
         if chart:
             # validate before emitting
             valid, _ = validate_chart_spec(chart)
             if valid:
-                answer_text += f"\n\n```chart\n{json.dumps(chart)}\n```"
+                chart_block = f"\n\n```chart\n{json.dumps(chart)}\n```"
 
-        # chunk answer for streaming
-        chunk_size = 400
-        for i in range(0, len(answer_text), chunk_size):
-            await _broadcast(session_id, "answer_delta", {"chunk": answer_text[i:i+chunk_size]})
-            await asyncio.sleep(0.12)
+        streamed = bool(EXECUTIONS.get(session_id, {}).get("_streamed", False))
+
+        if not streamed:
+            # node did not stream — emit main text in chunks for progressive display
+            full = answer_text + chart_block
+            chunk_size = 400
+            for i in range(0, len(full), chunk_size):
+                await _broadcast(session_id, "answer_delta", {"chunk": full[i:i+chunk_size]})
+                await asyncio.sleep(0.12)
+        else:
+            # LLM-driven: only auto-append chart if it's not marked optional or if LLM already included one
+            if chart_block and "```chart" not in answer_text:
+                is_optional = bool(chart.get("_llm_optional")) if isinstance(chart, dict) else False
+                # only force chart for change/fusion where it's genuinely useful; VQA/grounding respects LLM choice
+                task = final.get("task","")
+                if not is_optional or task in ("change_vqa","optical_sar_fusion"):
+                    # for VQA grounding, respect LLM omission — check if answer already has bbox/table
+                    if task not in ("vqa","grounding") or "confidence" in answer_text.lower():
+                        await _broadcast(session_id, "answer_delta", {"chunk": chart_block})
 
         # also emit table-like evidence if present
         if final.get("bbox_xyxy") or final.get("bbox") or final.get("bbox_normalized"):
@@ -300,13 +329,21 @@ async def task_health(session_id: str):
 async def llm_status():
     s = get_settings()
     prov = resolve_provider()
+    # distributed keys — count without exposing values
+    try:
+        from orchestrator.core.llm_client import _all_groq_keys, _has_mistral
+        groq_keys = _all_groq_keys()
+        has_mistral = _has_mistral()
+    except Exception:
+        groq_keys, has_mistral = [], False
     return {
         "provider": prov,
         "llm_provider_setting": s.llm_provider,
         "mock_qwen": s.mock_qwen,
         "has_local_qwen_capability": has_local_qwen_capability(),
         "local": {"base_url": s.qwen_base_url, "model": s.qwen_model, "has_ollama": has_local_qwen_capability()},
-        "groq": {"model": s.groq_model, "stt_model": s.groq_stt_model, "has_key": bool(s.groq_api_key), "base_url": s.groq_base_url},
+        "groq": {"model": s.groq_model, "router_model": getattr(s, "groq_router_model", ""), "stt_model": s.groq_stt_model, "has_key": bool(groq_keys), "key_count": len(groq_keys), "base_url": s.groq_base_url, "distribution": "router->GROQ1, planner->GROQ2, composer->Mistral->GROQ fallback"},
+        "mistral": {"model": getattr(s, "mistral_model", "mistral-small-latest"), "has_key": has_mistral, "base_url": getattr(s, "mistral_base_url", "https://api.mistral.ai/v1")},
         "voice_enabled": s.enable_voice,
     }
 
@@ -419,6 +456,34 @@ async def create_task(req: TaskRequest, background_tasks: BackgroundTasks):
     }
     background_tasks.add_task(run_pipeline, session_id, req.query.strip(), assets, image_ids)
     return {"session_id": session_id, "status": "queued"}
+
+@app.get("/api/v1/task/{session_id}/stream")
+async def stream_task(session_id: str, request: Request):
+    """SSE stream — no poll spam. Gateway prefers this over polling."""
+    from fastapi.responses import StreamingResponse
+    exec_ = EXECUTIONS.get(session_id)
+    if not exec_:
+        raise HTTPException(status_code=404, detail="session not found")
+    async def gen():
+        seen = 0
+        while True:
+            if await request.is_disconnected():
+                break
+            evs = EXECUTIONS.get(session_id, {}).get("events", [])
+            while seen < len(evs):
+                ev = evs[seen]
+                seen += 1
+                yield f"data: {json.dumps(ev)}\n\n"
+                if ev.get("event") in ("query_completed","final_answer","error","cancelled"):
+                    # give gateway a moment to drain then close
+                    await asyncio.sleep(0.05)
+                    return
+            # finished?
+            status = EXECUTIONS.get(session_id, {}).get("status")
+            if status in ("completed","failed","cancelled"):
+                return
+            await asyncio.sleep(0.25)
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
 
 @app.get("/api/v1/task/{session_id}")
 async def get_task(session_id: str):

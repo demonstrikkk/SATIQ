@@ -40,32 +40,41 @@ def post_processing_node(state: GraphState) -> GraphState:
     state["_needs_retry"] = False  # type: ignore
     state["error_type"] = None if conf >= CONF_THRESH else "permanent"
     state["error_code"] = None if conf >= CONF_THRESH else "low_confidence_permanent"
-    # chart spec generation — data-driven first, fallback to hardcoded
+    # chart spec — LLM-driven, not forced. Only build when task_output has meaningful categorical data.
     chart = None
     try:
+        # try data-driven first
         chart = build_chart_from_task_output(task_output)
         if chart:
             valid, _ = validate_chart_spec(chart)
             if not valid:
                 chart = None
-        # fallback legacy paths if data-driven returned None
+        # fallback only for tasks where a chart is semantically useful
+        # VQA donut is only useful when we have multi-class land-cover with distinct confidences,
+        # not for yes/no or single numeric answers. Let the LLM-composer decide inclusion.
         if chart is None:
             if task_type == "change_vqa":
+                # change always benefits from a bar chart, but keep it LLM-optional via flag
                 sectors = [{"name":"Sector A","value":9.2},{"name":"Sector B","value":6.1},{"name":"Sector C","value":3.4}]
                 chart = build_change_by_sector_chart(sectors, note=f"EPSG:32617 • 10 m GSD • {task_type}")
+                # mark as optional — composer may drop it
+                if chart:
+                    chart["_llm_optional"] = True  # type: ignore
             elif task_type == "optical_sar_fusion":
                 per = task_output.get("per_modality_confidence", {"optical":0.82,"sar":0.75,"fused":0.88})
                 chart = build_fusion_chart(per["optical"], per["sar"], per["fused"])
-            elif task_type in ("vqa","grounding"):
+                if chart:
+                    chart["_llm_optional"] = True  # type: ignore
+            elif task_type == "vqa" and task_output.get("answer_type") == "open" and task_output.get("key_objects"):
+                # only for open VQA with key_objects, not for closed yes/no
                 chart = vqa_chart(conf) if task_type=="vqa" else None
                 if chart:
+                    chart["_llm_optional"] = True  # type: ignore
                     valid, _ = validate_chart_spec(chart)
                     if not valid:
                         chart = None
-            if task_type == "optical_sar_fusion" and not chart:
-                per = task_output.get("per_modality_confidence", {})
-                if per:
-                    chart = fusion_chart(per)  # type: ignore
+            # grounding never gets an auto chart — bbox is enough
+        # grounding & closed VQA deliberately get no chart
     except Exception as e:
         state.setdefault("error_log", []).append(f"chart_build failed: {e}")  # type: ignore
         chart = None

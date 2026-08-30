@@ -8,16 +8,32 @@ from typing import Optional, Dict, Any
 
 from orchestrator.core.config import get_settings
 
+def _pick_transcribe_key() -> str | None:
+    s = get_settings()
+    # prefer GROQ_KEY1, fallback to any groq key
+    for cand in [
+        getattr(s, "groq_api_key1", ""),
+        getattr(s, "groq_api_key", ""),
+        getattr(s, "groq_api_key2", ""),
+        os.getenv("GROQ_API_KEY1", ""),
+        os.getenv("GROQ_API_KEY", ""),
+        os.getenv("GROQ_API_KEY2", ""),
+    ]:
+        if cand and cand.strip():
+            return cand.strip()
+    return None
+
 def get_groq_client():
     try:
         from openai import OpenAI  # type: ignore
     except Exception:
         return None
     s = get_settings()
-    if not s.groq_api_key:
+    key = _pick_transcribe_key()
+    if not key:
         return None
     try:
-        return OpenAI(base_url=s.groq_base_url, api_key=s.groq_api_key)  # type: ignore
+        return OpenAI(base_url=s.groq_base_url, api_key=key)  # type: ignore
     except Exception:
         return None
 
@@ -36,7 +52,7 @@ def transcribe_audio(
         return {"text": "", "error": "voice disabled (ENABLE_VOICE=false)", "_provider": "disabled", "_mock": True}
 
     # Mock if no key
-    if not s.groq_api_key:
+    if not _pick_transcribe_key():
         # deterministic mock transcription for offline testing
         return {
             "text": "Describe the land-cover and major objects visible in this image.",

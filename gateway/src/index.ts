@@ -11,6 +11,7 @@ import authRouter from './routes/auth';
 import sessionRouter from './routes/session';
 import uploadRouter from './routes/upload';
 import queryRouter from './routes/query';
+import sttRouter from './routes/stt';
 
 // Import middlewares
 import { apiLimiter } from './middleware/rateLimiter';
@@ -68,6 +69,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/session', authenticateToken as any, sessionRouter);
 app.use('/api/upload', authenticateToken as any, uploadRouter);
 app.use('/api/query', authenticateToken as any, queryRouter);
+app.use('/api/stt', authenticateToken as any, sttRouter);
 
 // Global Error Handler
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {

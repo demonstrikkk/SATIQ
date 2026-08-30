@@ -43,10 +43,12 @@ export function RightThinkingPanel({ open, onClose }: { open: boolean; onClose: 
   const { messages } = useChatStore();
   const { selectedFeatureId, features } = useMapStore();
   const [now, setNow] = useState(Date.now());
+  const running = !["completed", "failed", "cancelled", "idle"].includes(globalStatus);
   useEffect(() => {
+    if (!running) return; // freeze the clock once the run is terminal
     const id = setInterval(() => setNow(Date.now()), 150);
     return () => clearInterval(id);
-  }, []);
+  }, [running]);
   const selected = features.find((f) => f.id === selectedFeatureId);
   const isInspection = !!selected;
   const artifacts = messages.filter(

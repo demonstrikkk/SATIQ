@@ -54,7 +54,7 @@ export function applyExecutionEvent(ev: ExecutionEvent) {
     setGlobalStatus("composing"); setComposerStatus("running");
     const id = `ans_${Date.now()}`;
     lastAssistantId = id;
-    addMessage({ id, role: "assistant", content: "", streaming: true, thinking: "", thinkingStreaming: true, thinkingCollapsed: false });
+    addMessage({ id, role: "assistant", content: "", streaming: true, thinking: "", thinkingStreaming: true, thinkingCollapsed: false, model: (ev.payload as any)?.llm });
   }
   if (ev.event === "thinking_delta") {
     if (lastAssistantId) appendThinking(lastAssistantId, (ev.payload as any)?.chunk ?? "");
@@ -79,11 +79,21 @@ export function applyExecutionEvent(ev: ExecutionEvent) {
     if (lastAssistantId) {
       appendChunk(lastAssistantId, `\n\n> ⚠️ ${msg}`);
       setStreaming(lastAssistantId, false);
+      setThinkingStreaming(lastAssistantId, false);
+      setThinkingCollapsed(lastAssistantId, true);
     }
     setComposerStatus("failed" as any);
     setGlobalStatus("failed" as any);
   }
-  if (ev.event === "cancelled") { setGlobalStatus("cancelled" as any); }
+  if (ev.event === "cancelled") {
+    if (lastAssistantId) {
+      setStreaming(lastAssistantId, false);
+      setThinkingStreaming(lastAssistantId, false);
+      setThinkingCollapsed(lastAssistantId, true);
+    }
+    setComposerStatus("cancelled" as any);
+    setGlobalStatus("cancelled" as any);
+  }
 }
 
 export function resetLastAssistantId() { lastAssistantId = null; }

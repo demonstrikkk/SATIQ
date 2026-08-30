@@ -3,8 +3,9 @@ from __future__ import annotations
 import time
 from orchestrator.models.graph_state import GraphState, add_trace
 from orchestrator.core.llm_client import call_qwen_planner
+from orchestrator.core.events import emit
 
-def planner_node(state: GraphState) -> GraphState:
+async def planner_node(state: GraphState) -> GraphState:
     t0 = time.time()
     query = state.get("query","")
     task_type = state.get("task_type","vqa")
@@ -64,4 +65,13 @@ def planner_node(state: GraphState) -> GraphState:
     state["requires_coreg"] = bool(plan["requires_coreg"])
     state["plan"] = plan
     add_trace(state, "planner", "ok", {"plan": plan, "requires_coreg": state["requires_coreg"], "sub_queries": plan.get("sub_queries"), "region": plan.get("region_of_interest")}, latency_ms=int((time.time()-t0)*1000))
+    # surface the real planner reasoning as a live "thinking" delta in the chat
+    sess = state.get("session_id")
+    if sess:
+        reasoning = (plan.get("reasoning") or "").strip()
+        txt = f"🧭 Planner ({plan.get('_provider','qwen')}): {reasoning}\n" if reasoning else f"🧭 Planner ({plan.get('_provider','qwen')}): task={plan.get('task_type')}, coreg={plan.get('requires_coreg')}\n"
+        try:
+            await emit(sess, "thinking_delta", {"chunk": txt})
+        except Exception:
+            pass
     return state

@@ -6,7 +6,7 @@ import { ChatCanvas } from "@/components/chat/ChatCanvas";
 import { useWorkspaceStore } from "@/store/workspace.store";
 import { useChatStore } from "@/store/chat.store";
 import { useExecutionStore } from "@/store/execution.store";
-import { simulateAnalysisQuery } from "@/mocks/mockStream";
+import { executeRealAnalysis } from "@/lib/analysisClient";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Globe, X, MessageSquare, Satellite } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -329,7 +329,7 @@ function CommandPalette() {
               onClick={() => {
                 setCommandOpen(false);
                 addMessage({ id: Date.now().toString(), role: "user", content: it });
-                simulateAnalysisQuery(it, []);
+                void executeRealAnalysis(it, []).catch((e) => console.error("[analysis]", e));
               }}
               className="w-full text-left px-3 py-2.5 rounded-xl text-[13px] text-slate-400 hover:text-white hover:bg-[#141F30] transition-colors active:scale-[0.98]"
             >

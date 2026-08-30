@@ -1,9 +1,9 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from "react";
-import { Paperclip, ArrowUp, MapPin, X, Image as ImageIcon, Loader2, AlertCircle, Clock3 } from "lucide-react";
+import { Paperclip, ArrowUp, MapPin, X, Mic, Square, Image as ImageIcon, Loader2, AlertCircle, Clock3 } from "lucide-react";
 import { useChatStore, type ChatContext } from "@/store/chat.store";
 import { useWorkspaceStore } from "@/store/workspace.store";
 import { useExecutionStore } from "@/store/execution.store";
-import { simulateAnalysisQuery } from "@/mocks/mockStream";
+import { executeRealAnalysis } from "@/lib/analysisClient";
 import { analyses } from "@/mocks/analyses";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -283,6 +283,11 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const {
     activeContexts,
@@ -369,6 +374,63 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
     }
   }, [active, activeContexts, addContext]);
 
+  // -------- Voice input (STT via gateway /api/stt → orchestrator Groq Whisper) --------
+  const stopRecording = useCallback(() => {
+    try { mediaRecorderRef.current?.stop(); } catch {}
+    setRecording(false);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    if (recording) {
+      stopRecording();
+      return;
+    }
+    if (transcribing) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mr = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      mr.onstop = async () => {
+        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || "audio/webm" });
+        audioChunksRef.current = [];
+        if (blob.size === 0) return;
+        setTranscribing(true);
+        try {
+          const tok = localStorage.getItem("satiq_token");
+          const fd = new FormData();
+          fd.append("file", blob, "speech.webm");
+          const res = await fetch(`${(import.meta as any).env?.VITE_API_BASE ?? ""}/api/stt`, {
+            method: "POST",
+            headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+            body: fd,
+          });
+          const data = (await res.json().catch(() => ({}))) as any;
+          if (!res.ok) {
+            console.error("[stt]", data?.error || res.status);
+          } else {
+            const transcript = (data?.text || "").trim();
+            if (transcript) setText((prev) => (prev ? `${prev} ${transcript}` : transcript));
+          }
+        } catch {
+          // swallow — silent STT failure on landing screen
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setRecording(true);
+    } catch {
+      setRecording(false);
+    }
+  }, [recording, transcribing, stopRecording]);
+
   const handleSend = useCallback(
     (override?: string) => {
       const q = (override ?? text).trim();
@@ -396,7 +458,7 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
       setIsSending(true);
       setError(null);
       addMessage({ id: Date.now().toString(), role: "user", content: finalMessage, contexts: snapshot });
-      simulateAnalysisQuery(finalMessage, snapshot);
+      void executeRealAnalysis(finalMessage, snapshot as any).catch((e) => console.error("[analysis]", e));
       setText("");
       if (taRef.current) taRef.current.style.height = "auto";
       clearContexts();
@@ -418,7 +480,7 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
       useChatStore.getState().clearQueue();
       setTimeout(() => {
         addMessage({ id: Date.now().toString(), role: "user", content: combinedContent, contexts: combinedContexts });
-        simulateAnalysisQuery(combinedContent, combinedContexts);
+        void executeRealAnalysis(combinedContent, combinedContexts as any).catch((e) => console.error("[analysis]", e));
       }, 250);
     }
   }, [globalStatus, queuedMessages.length, addMessage]);
@@ -728,6 +790,21 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
                   disabled={isSending}
                 >
                   <MapPin size={16} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "h-8 w-8 rounded-xl transition-colors",
+                    recording
+                      ? "text-rose-400 bg-rose-500/15 animate-pulse"
+                      : "text-slate-600 hover:text-slate-300 hover:bg-white/5"
+                  )}
+                  onClick={startRecording}
+                  aria-label={recording ? "Stop recording" : "Voice input"}
+                  disabled={isSending || transcribing}
+                >
+                  {transcribing ? <Loader2 size={16} className="animate-spin" /> : recording ? <Square size={13} className="fill-current" /> : <Mic size={16} />}
                 </Button>
               </div>
 

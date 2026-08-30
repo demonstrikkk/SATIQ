@@ -6,6 +6,7 @@ import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useExecutionStore } from "@/store/execution.store";
 import { isMockGenerating, cancelCurrentQuery } from "@/mocks/mockStream";
+import { updateSessionBackend } from "@/lib/sessionSync";
 import { toast } from "sonner";
 
 const CATEGORY_ICON: Record<string, typeof MapPin> = {
@@ -27,6 +28,14 @@ function loadMessagesFor(id: string) {
     if (raw) return JSON.parse(raw);
   } catch {}
   return null;
+}
+
+// Persist conversation to localStorage (authoritative offline) and mirror to backend (best-effort).
+function persistMessages(id: string, messages: unknown[]) {
+  try {
+    localStorage.setItem(`satiq:session:${id}:messages`, JSON.stringify(messages));
+  } catch {}
+  void updateSessionBackend(id, { chatHistory: messages });
 }
 
 export function LeftSessionsPanel() {
@@ -79,10 +88,7 @@ export function LeftSessionsPanel() {
     if (isMockGenerating()) cancelCurrentQuery();
     // save current before switching
     if (activeAnalysisId) {
-      try {
-        const msgs = useChatStore.getState().messages;
-        localStorage.setItem(`satiq:session:${activeAnalysisId}:messages`, JSON.stringify(msgs));
-      } catch {}
+      persistMessages(activeAnalysisId, useChatStore.getState().messages);
     }
     const id = createSession();
     clear();
@@ -96,9 +102,7 @@ export function LeftSessionsPanel() {
     if (isMockGenerating()) cancelCurrentQuery();
     // save current
     if (activeAnalysisId) {
-      try {
-        localStorage.setItem(`satiq:session:${activeAnalysisId}:messages`, JSON.stringify(useChatStore.getState().messages));
-      } catch {}
+      persistMessages(activeAnalysisId, useChatStore.getState().messages);
     }
     // load target
     const stored = loadMessagesFor(id);
@@ -150,7 +154,7 @@ export function LeftSessionsPanel() {
 
   const handleClear = (id: string) => {
     if (activeAnalysisId === id && isMockGenerating()) cancelCurrentQuery();
-    try { localStorage.setItem(`satiq:session:${id}:messages`, JSON.stringify([])); } catch {}
+    persistMessages(id, []);
     if (activeAnalysisId === id) {
       clear();
       reset();
@@ -166,7 +170,7 @@ export function LeftSessionsPanel() {
       const srcMsgs = srcRaw ? JSON.parse(srcRaw) : [];
       const srcSession = sessions.find((s) => s.id === id);
       const dupId = createSession(`${srcSession?.title ?? "Chat"} — copy`);
-      localStorage.setItem(`satiq:session:${dupId}:messages`, JSON.stringify(Array.isArray(srcMsgs) ? srcMsgs : []));
+      persistMessages(dupId, Array.isArray(srcMsgs) ? srcMsgs : []);
       const stored = loadMessagesFor(dupId);
       if (stored) setMessages(stored);
       reset();

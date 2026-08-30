@@ -87,7 +87,24 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
       });
     }
     if (globalStatus === "completed" || globalStatus === "failed" || globalStatus === "cancelled") {
-      // auto-complete pending -> failed if cancelled, else keep
+      // Freeze any step that never received its own completion event so its
+      // live timer stops incrementing (no perpetual spinners on stop/drop).
+      const nowTs = Date.now();
+      steps = steps.map((st) => {
+        if (st.status === "running" || st.status === "pending") {
+          const started = nextStartedAt[st.id];
+          const dur = started ? nowTs - (started as number) : undefined;
+          return {
+            ...st,
+            status: (globalStatus === "cancelled" ? ("failed" as PipelineStepStatus) : st.status),
+            ...(dur !== undefined ? { durationMs: dur } : {}),
+          };
+        }
+        if (st.durationMs === undefined && nextStartedAt[st.id]) {
+          return { ...st, durationMs: nowTs - (nextStartedAt[st.id] as number) };
+        }
+        return st;
+      });
     }
     return { globalStatus, pipelineSteps: steps, stepStartedAt: nextStartedAt };
   }),
