@@ -186,6 +186,147 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
             # pass through task_output details
             await _broadcast(session_id, "model_done", {"model": model_name, **{k:v for k,v in task_output.items() if k not in ("fused_repr","embeddings")}, "status": "OK" if not result_state.get("error") else "FAILED"})
 
+            # STEP-BY-STEP VISUALS: broadcast every model artifact as inline chat image (data:) so frontend StreamMarkdown SingleImageBlock shows it
+            print(f"[visuals] task_type={task_type} image_ids={image_ids} artifacts={(task_output.get('artifacts') or [])[:2]}")
+            try:
+                import base64 as _b64, re as _re2
+                from pathlib import Path as _P
+                def _resolve_for_chat(aid: str) -> _P | None:
+                    # mirror orchestrator/agents/task_agents.py:_resolve_asset_path (handles file_...png_hsc, asset_ prefix, timestamp)
+                    raw = aid
+                    if raw.startswith("asset_"): raw = raw[len("asset_"):]
+                    raw = _re2.sub(r"(\.png|\.jpg|\.jpeg|\.tif|\.tiff)(_[a-zA-Z0-9]+)$", r"\1", raw)
+                    raw = _re2.sub(r"\.(png|jpg|jpeg|tif|tiff)_[a-zA-Z0-9]+$", r".\1", raw)
+                    cands = [aid, raw, _P(aid).name, _P(raw).name]
+                    # file_ timestamp → meaningful suffix (file_1788198068947_t1_rgb.png → t1_rgb.png)
+                    for c in list(cands):
+                        if c.startswith("file_") and "_" in c:
+                            parts = c.split("_")
+                            if len(parts) >= 3:
+                                meaningful = "_".join(parts[2:])
+                                meaningful = _re2.sub(r"(\.png|\.jpg|\.jpeg|\.tif|\.tiff)(_[a-zA-Z0-9]+)$", r"\1", meaningful)
+                                cands.append(meaningful)
+                                cands.append(_P(meaningful).stem + ".tif")
+                                cands.append(_P(meaningful).stem + ".png")
+                                cands.append(c[len("file_"):])
+                    # expand
+                    uniq = []
+                    seen = set()
+                    for c in cands:
+                        if c not in seen:
+                            seen.add(c); uniq.append(c)
+                    for cand in uniq:
+                        for base in ["orchestrator/storage/ingest", "gateway/upload", "orchestrator/storage", "outputs"]:
+                            try:
+                                p = _P(base) / cand
+                                if p.exists(): return p
+                                # rglob in ingest/outputs
+                                if base in ("orchestrator/storage/ingest","outputs"):
+                                    for found in _P(base).rglob(_P(cand).name):
+                                        if found.exists(): return found
+                                    # stem match for tif
+                                    stem = _P(cand).stem
+                                    for found in _P(base).rglob(f"{stem}.tif"):
+                                        if found.is_file(): return found
+                                    for found in _P(base).rglob(f"{stem}.png"):
+                                        if found.is_file(): return found
+                            except Exception: pass
+                        if _P(cand).exists(): return _P(cand)
+                    # absolute gateway fallback
+                    for cand in uniq:
+                        for abs_gw in [r"C:\Users\aarav\Downloads\SATIQ\gateway\upload", r"C:\Users\aarav\Downloads\SATIQ\gateway/upload"]:
+                            p = _P(abs_gw) / _P(cand).name
+                            if p.exists(): return p
+                    return None
+                # 1) Show input image(s) first — proves your upload is used (not hard-coded) — handles _hsc suffix
+                # FIX: don't use base64 (causes PUT /api/session 500 entity too large), copy to gateway/upload and use /api/assets URL
+                import shutil as _sh
+                _gw_upload = _P(r"C:\Users\aarav\Downloads\SATIQ\gateway\upload")
+                _gw_upload.mkdir(parents=True, exist_ok=True)
+                for iid in (image_ids or [])[:2]:
+                    print(f"[visuals] resolving input {iid}")
+                    p = _resolve_for_chat(iid)
+                    print(f"[visuals] resolved {iid} -> {p} exists={p.exists() if p else False}")
+                    if p is not None and p.exists() and p.suffix.lower() in (".png",".jpg",".jpeg",".tif",".tiff"):
+                            try:
+                                # copy to gateway/upload so /api/assets can serve it (small URL, no 500)
+                                label = iid.replace("asset_","").replace("file_","")[:40]
+                                # sanitize label for filename
+                                safe = _re2.sub(r"[^a-zA-Z0-9._-]", "_", label)
+                                if not safe.lower().endswith((".png",".jpg",".jpeg")):
+                                    safe = safe + ".png"
+                                dst = _gw_upload / f"chat_{session_id}_{safe}"
+                                if p.suffix.lower() in (".tif",".tiff"):
+                                    from PIL import Image as _PIL
+                                    im = _PIL.open(p)
+                                    if im.mode not in ("RGB","RGBA"): im = im.convert("RGB")
+                                    # resize to max 768 for chat to keep file small
+                                    if max(im.size) > 768:
+                                        im.thumbnail((768,768))
+                                    im.save(dst, format="PNG")
+                                else:
+                                    # copy and resize if needed
+                                    from PIL import Image as _PIL2
+                                    try:
+                                        im2 = _PIL2.open(p)
+                                        if max(im2.size) > 768:
+                                            im2.thumbnail((768,768))
+                                            if im2.mode not in ("RGB","RGBA"): im2 = im2.convert("RGB")
+                                            im2.save(dst, format="PNG")
+                                        else:
+                                            _sh.copy(p, dst)
+                                    except Exception:
+                                        _sh.copy(p, dst)
+                                url = f"http://localhost:4000/api/assets/{dst.name}"
+                                print(f"[visuals] broadcasting input -> {url}")
+                                await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n![Input — {label}]({url})"})
+                                await asyncio.sleep(0.05)
+                                break
+                            except Exception as _e_in:
+                                print(f"[visuals] input broadcast failed {_e_in}")
+                                pass
+                # 2) Show every model artifact (grounding bbox overlay, change delta, CROMA 4-panel, topcam) step-by-step
+                all_arts = []
+                for k in ("artifacts","visual_artifacts"):
+                    v = task_output.get(k) or final.get(k) or []
+                    if isinstance(v, list): all_arts.extend(v)
+                # dedupe by path
+                seen_p = set()
+                for art in all_arts:
+                    pstr = art.get("path") if isinstance(art, dict) else str(art)
+                    if not pstr or pstr in seen_p: continue
+                    seen_p.add(pstr)
+                    p = _P(pstr)
+                    if not p.exists():
+                        # try filename search in outputs
+                        try:
+                            found = list(_P("outputs").rglob(p.name))
+                            if found: p = found[0]
+                        except Exception: pass
+                    if p.exists() and p.suffix.lower() in (".png",".jpg",".jpeg"):
+                        try:
+                            # copy to gateway/upload and use URL (not base64) to avoid 500 entity too large
+                            typ = art.get("type","model output") if isinstance(art, dict) else "model output"
+                            step_label = {"vqa":"VQA","grounding":"GroundingDINO bbox overlay","change_vqa":"Change map","optical_sar_fusion":"CROMA fusion"} .get(task_type, typ)
+                            if "croma_4panel" in typ: step_label = "CROMA 4-panel (Optical RGB / SAR VV / SAR VH / CAM overlay)"
+                            elif "topcam" in typ: step_label = "CROMA CAM heatmap"
+                            elif "delta" in typ or "change" in typ: step_label = "Change detection map"
+                            elif "bbox" in typ or "overlay" in typ: step_label = "Grounding bbox overlay"
+                            dst2 = _gw_upload / f"chat_{session_id}_{p.name}"
+                            try:
+                                _sh.copy(p, dst2)
+                            except Exception:
+                                dst2 = p
+                            url2 = f"http://localhost:4000/api/assets/{dst2.name}"
+                            print(f"[visuals] broadcasting artifact {typ} -> {url2}")
+                            await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n![{step_label} — {p.name}]({url2})"})
+                            await asyncio.sleep(0.08)
+                        except Exception: pass
+                    elif p.exists() and p.suffix.lower() == ".npy":
+                        pass  # skip npy
+            except Exception:
+                pass
+
             await _broadcast(session_id, "evidence_started")
             await asyncio.sleep(0.05)
             conf = final.get("confidence") or result_state.get("confidence") or 0.82
@@ -242,6 +383,70 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
         if final.get("per_modality_confidence"):
             per = final["per_modality_confidence"]
             await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n| Modality | Confidence |\n|---|---:|\n| Optical | {per.get('optical',0):.2f} |\n| SAR | {per.get('sar',0):.2f} |\n| Fused | {per.get('fused',0):.2f} |"})
+
+        # FINAL SAFETY: ensure at least the input image is appended to final_answer even if earlier broadcast missed (handles _hsc suffix case) — use URL not base64 to avoid 500
+        try:
+            from pathlib import Path as _P2
+            has_image_in_answer = "http://localhost:4000/api/assets" in (answer_text or final.get("answer_text") or "")
+            if not has_image_in_answer:
+                for iid in (image_ids or [])[:1]:
+                    import re as _re3, shutil as _sh2
+                    raw = iid
+                    if raw.startswith("asset_"): raw = raw[len("asset_"):]
+                    raw = _re3.sub(r"(\.png|\.jpg|\.jpeg|\.tif|\.tiff)(_[a-zA-Z0-9]+)$", r"\1", raw)
+                    cand_names = [raw, _P2(raw).name]
+                    if raw.startswith("file_"):
+                        parts = raw.split("_")
+                        if len(parts) >= 3:
+                            cand_names.append("_".join(parts[2:]))
+                    p_found = None
+                    for cn in cand_names:
+                        for base in ["gateway/upload", "orchestrator/storage/ingest"]:
+                            cand_p = _P2(base) / cn
+                            if cand_p.exists():
+                                p_found = cand_p; break
+                            try:
+                                for f in _P2(base).rglob(_P2(cn).name):
+                                    p_found = f; break
+                            except Exception: pass
+                            if p_found: break
+                        if p_found: break
+                    if p_found is None:
+                        for cn in cand_names:
+                            p_abs = _P2(r"C:\Users\aarav\Downloads\SATIQ\gateway\upload") / _P2(cn).name
+                            if p_abs.exists():
+                                p_found = p_abs; break
+                    if p_found and p_found.exists():
+                        try:
+                            gw = _P2(r"C:\Users\aarav\Downloads\SATIQ\gateway\upload")
+                            gw.mkdir(parents=True, exist_ok=True)
+                            dst = gw / f"chat_{session_id}_{p_found.name}"
+                            if p_found.suffix.lower() in (".tif",".tiff"):
+                                from PIL import Image as _PIL2
+                                im = _PIL2.open(p_found)
+                                if im.mode not in ("RGB","RGBA"): im = im.convert("RGB")
+                                if max(im.size) > 768: im.thumbnail((768,768))
+                                im.save(dst, format="PNG")
+                            else:
+                                try:
+                                    from PIL import Image as _PIL3
+                                    im3 = _PIL3.open(p_found)
+                                    if max(im3.size) > 768:
+                                        im3.thumbnail((768,768))
+                                        if im3.mode not in ("RGB","RGBA"): im3 = im3.convert("RGB")
+                                        im3.save(dst, format="PNG")
+                                    else:
+                                        _sh2.copy(p_found, dst)
+                                except Exception:
+                                    _sh2.copy(p_found, dst)
+                            url = f"http://localhost:4000/api/assets/{dst.name}"
+                            md = f"\n\n![Input — {p_found.name}]({url})"
+                            await _broadcast(session_id, "answer_delta", {"chunk": md})
+                            final["answer_text"] = (final.get("answer_text") or "") + md
+                            break
+                        except Exception: pass
+        except Exception:
+            pass
 
         await _broadcast(session_id, "final_answer", {"result": final})
         await _broadcast(session_id, "query_completed", {})

@@ -27,8 +27,8 @@ if (!process.env.JWT_SECRET) {
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Security and Logging middleware
-app.use(helmet());
+// Security and Logging middleware — allow cross-origin images for chat (fix Preview unavailable)
+app.use(helmet({ crossOriginResourcePolicy: false, crossOriginEmbedderPolicy: false }));
 
 // CORS: allow-list from CORS_ORIGIN (comma-separated); defaults to all origins in development.
 const corsOrigins = (process.env.CORS_ORIGIN ?? '*').split(',').map((o) => o.trim());
@@ -38,7 +38,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(morgan('dev'));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Global API rate limiting
 app.use('/api', apiLimiter);
@@ -60,7 +61,11 @@ const candidates = [
   path.resolve(process.cwd(), 'gateway/upload'),
 ];
 const uploadDir = candidates.find((p) => { try { return fs.existsSync(p); } catch { return false; } }) ?? candidates[0];
-app.use('/api/assets', express.static(uploadDir));
+app.use('/api/assets', (req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  next();
+}, express.static(uploadDir));
 
 // Unprotected routes
 app.use('/api/auth', authRouter);
