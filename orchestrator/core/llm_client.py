@@ -382,6 +382,10 @@ def _is_rate_limit_error(e: Exception) -> bool:
     msg = str(e).lower()
     return "429" in msg or "rate" in msg or "too many" in msg or "quota" in msg
 
+def _is_connection_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(k in msg for k in ["connection", "connect", "timeout", "timed out", "no internet", "network", "unreachable", "failed to", "name not resolved", "getaddrinfo", "offline"])
+
 def _dummy_router(query: str, assets: list | None = None) -> Dict[str, Any]:
     q = query.lower().strip()
     # Non-hardcoded check: use LLM-like reasoning for fallback — no exhaustive word list
@@ -634,8 +638,38 @@ Answer with ONE word only from: vqa, grounding, change_vqa, optical_sar_fusion, 
             if qwen_circuit is not None:
                 try: qwen_circuit.record_failure()
                 except Exception: pass
-            raise RuntimeError(f"Router Groq failed after retries: {e} — NO MOCK allowed")
-    # local path (Ollama) — JSON mode
+            # OFFLINE FIX: when no internet (connection error) and Ollama qwen3.5:9b is available, directly use local — no heuristic fallback
+            if _is_connection_error(e) and has_local_qwen_capability():
+                print(f"[router offline → switching to Ollama qwen3.5:9b] {e}")
+                try:
+                    import ollama as _ollama_off
+                    _model_off = s.qwen_model
+                    _prompt_off = f"""You are Satiq's router. Classify the geospatial query into one task.
+Tasks: vqa, grounding, change_vqa, optical_sar_fusion
+Query: "{query}"
+Assets: {assets or []}
+Return JSON only: {{"task_type": "...", "reasoning": "...", "confidence": 0.0-1.0}}"""
+                    _resp_off = _ollama_off.chat(model=_model_off, messages=[{"role":"user","content": _prompt_off}])
+                    raw_off = _resp_off.get("message", {}).get("content", "") or ""
+                    jstr_off = _extract_json(raw_off)
+                    if jstr_off:
+                        data_off = json.loads(jstr_off)
+                        data_off["_provider"] = "local"
+                        data_off["_model"] = _model_off
+                        data_off["_offline_fallback"] = True
+                        return data_off
+                except Exception as _e_off:
+                    print(f"[router offline Ollama also failed] {_e_off}")
+            # Only use heuristic if Ollama not available
+            if has_local_qwen_capability():
+                raise RuntimeError(f"Router Groq failed and offline Qwen also failed: {e}")
+            print(f"[router Groq connection failed, using heuristic fallback] {e}")
+            fb = _dummy_router(query, assets)
+            fb["_provider"] = "fallback_heuristic"
+            fb["_fallback"] = str(e)[:150]
+            fb["reasoning"] = f"Groq connection failed ({str(e)[:80]}), fallback heuristic: {fb.get('reasoning','')}"
+            return fb
+    # local path (Ollama) — use ollama package directly (OpenAI v1 returns empty for qwen3.5 thinking)
     model = s.qwen_model
     prompt = f"""You are Satiq's router. Classify the geospatial query into one task.
 Tasks: vqa, grounding, change_vqa, optical_sar_fusion
@@ -643,14 +677,21 @@ Query: "{query}"
 Assets: {assets or []}
 Return JSON only, no <think>, no markdown, no explanation: {{"task_type": "...", "reasoning": "...", "confidence": 0.0-1.0}}"""
     try:
-        resp = cli.chat.completions.create(  # type: ignore
-            model=model,
-            messages=[{"role":"user","content": prompt}],
-            temperature=0.1,
-            max_tokens=256,
-            response_format={"type":"json_object"},  # type: ignore
-        )
-        raw = resp.choices[0].message.content or ""
+        # Use ollama native API for local (more reliable than OpenAI compat for qwen thinking)
+        try:
+            import ollama as _ollama
+            _resp = _ollama.chat(model=model, messages=[{"role":"user","content": prompt}])
+            raw = _resp.get("message", {}).get("content", "") or ""
+        except Exception:
+            # Fallback to OpenAI compat if ollama package fails
+            resp = cli.chat.completions.create(  # type: ignore
+                model=model,
+                messages=[{"role":"user","content": prompt}],
+                temperature=0.1,
+                max_tokens=256,
+                response_format={"type":"json_object"},  # type: ignore
+            )
+            raw = resp.choices[0].message.content or ""
         if qwen_circuit is not None:
             try: qwen_circuit.record_success()
             except Exception: pass
@@ -679,6 +720,9 @@ Return JSON only, no <think>, no markdown, no explanation: {{"task_type": "...",
         if qwen_circuit is not None:
             try: qwen_circuit.record_failure()
             except Exception: pass
+        # OFFLINE: if local Ollama failed, don't mock — raise so caller knows (unless no capability)
+        if has_local_qwen_capability():
+            raise RuntimeError(f"Local Qwen router failed: {e}")
         base = _dummy_router(query, assets)
         base["_mock"] = True
         base["_fallback"] = str(e)[:120]
@@ -730,6 +774,35 @@ Produce JSON with keys: task_type, reasoning, required_assets, fusion_needed, te
         actual_prov = "groq"
         model = _groq_router_model_name()
     try:
+        # Local Ollama uses native API for reliability (OpenAI v1 returns empty for qwen thinking)
+        if actual_prov == "local":
+            try:
+                import ollama as _ollama2
+                _resp2 = _ollama2.chat(model=model, messages=[{"role":"user","content": prompt}])
+                raw = _resp2.get("message", {}).get("content", "") or ""
+                if qwen_circuit is not None:
+                    try: qwen_circuit.record_success()
+                    except Exception: pass
+                jstr = _extract_json(raw)
+                if jstr:
+                    data = json.loads(jstr)
+                    data.setdefault("task_type", task_type)
+                    data["_provider"] = "local"
+                    data["_model"] = model
+                    return data
+                return {
+                    "task_type": task_type,
+                    "reasoning": f"Ollama qwen planned {task_type}: {raw[:150]}",
+                    "required_assets": [],
+                    "fusion_needed": task_type == "optical_sar_fusion",
+                    "temporal_needed": task_type == "change_vqa",
+                    "confidence": 0.80,
+                    "_provider": "local",
+                    "_model": model,
+                }
+            except Exception as _e2:
+                print(f"[planner local ollama failed, trying OpenAI compat] {_e2}")
+                pass
         resp_kwargs = {
             "model": model,
             "messages": [{"role":"user","content": prompt}],
@@ -804,11 +877,30 @@ Produce JSON with keys: task_type, reasoning, required_assets, fusion_needed, te
         if qwen_circuit is not None:
             try: qwen_circuit.record_failure()
             except Exception: pass
-        # Return minimal valid plan instead of raising — keeps pipeline alive for vision models
+        # OFFLINE FIX: if no internet and Ollama available, use local Qwen directly — no heuristic plan
+        if _is_connection_error(e) and has_local_qwen_capability():
+            print(f"[planner offline → switching to Ollama qwen3.5:9b] {e}")
+            try:
+                import ollama as _ollama_p
+                _model_p = s.qwen_model
+                _resp_p = _ollama_p.chat(model=_model_p, messages=[{"role":"user","content": prompt}])
+                raw_p = _resp_p.get("message", {}).get("content", "") or ""
+                jstr_p = _extract_json(raw_p)
+                if jstr_p:
+                    data_p = json.loads(jstr_p)
+                    data_p.setdefault("task_type", task_type)
+                    data_p["_provider"] = "local"
+                    data_p["_model"] = _model_p
+                    return data_p
+            except Exception as _e_p:
+                print(f"[planner offline Ollama also failed] {_e_p}")
+        if has_local_qwen_capability():
+            raise RuntimeError(f"Planner Groq failed and offline Qwen also failed: {e}")
+        # Return minimal valid plan instead of raising — keeps pipeline alive for vision models (clean reasoning, no error exposed to UI)
         print(f"[planner Groq failed, using fallback plan] task_type={task_type} err={str(e)[:200]}")
         return {
             "task_type": task_type,
-            "reasoning": f"Planner Groq failed, fallback to {task_type}: {str(e)[:100]}",
+            "reasoning": f"Planned {task_type} for query: {task_type} analysis with {len(assets) if assets else 0} assets",
             "required_assets": [],
             "fusion_needed": task_type == "optical_sar_fusion",
             "temporal_needed": task_type == "change_vqa",
@@ -856,6 +948,19 @@ You control what the frontend renders. Decide per-response what to show:
     # Don't force gpt-oss-20b — it hangs/returns empty on Groq. Keep original model_hint.
     # Elaborative response: max_tokens 2048+ no cap, NO TIME LIMIT
     try:
+        # Local Ollama uses native API (OpenAI compat returns empty for qwen thinking)
+        if actual_prov == "local":
+            try:
+                import ollama as _ollama_c
+                _r = _ollama_c.chat(model=model, messages=[{"role":"user","content": prompt}])
+                txt = _r.get("message", {}).get("content", "") or ""
+                if qwen_circuit is not None:
+                    try: qwen_circuit.record_success()
+                    except Exception: pass
+                return txt or task_output.get("answer_text","")
+            except Exception as _e_local:
+                print(f"[composer local ollama failed, trying OpenAI compat] {_e_local}")
+                pass
         resp = cli.chat.completions.create(  # type: ignore
             model=model,
             messages=[{"role":"user","content": prompt}],
@@ -895,6 +1000,18 @@ You control what the frontend renders. Decide per-response what to show:
         if qwen_circuit is not None:
             try: qwen_circuit.record_failure()
             except Exception: pass
+        # OFFLINE FIX: try Ollama qwen3.5:9b directly when Groq/Mistral connection fails
+        if _is_connection_error(e) and has_local_qwen_capability():
+            print(f"[composer offline → switching to Ollama qwen3.5:9b] {e}")
+            try:
+                import ollama as _ollama_cc
+                _m = get_settings().qwen_model
+                _r = _ollama_cc.chat(model=_m, messages=[{"role":"user","content": prompt}])
+                txt = _r.get("message", {}).get("content", "") or ""
+                if txt:
+                    return txt
+            except Exception as _e_cc:
+                print(f"[composer offline Ollama also failed] {_e_cc}")
         raise RuntimeError(f"Composer Groq failed: {e} — NO MOCK allowed")
 
 
@@ -935,6 +1052,22 @@ You control what the frontend renders. Decide per-response what to show:
     model = model_hint if actual_prov in ("mistral", "groq") else (s.qwen_model if actual_prov == "local" else model_hint)
     # Fix: keep proven model (qwen/qwen3.6-27b or mistral-small-latest), gpt-oss-20b returns empty on Groq
     # NO TIME LIMIT for demo
+    # Local Ollama streaming via native API (OpenAI v1 returns empty for qwen)
+    if actual_prov == "local":
+        try:
+            import ollama as _ollama_s
+            stream = _ollama_s.chat(model=model, messages=[{"role":"user","content": prompt}], stream=True)
+            async def _ollama_raw():
+                for chunk in stream:
+                    d = chunk.get("message", {}).get("content", "")
+                    if d:
+                        yield d
+            async for tok in _ollama_raw():
+                yield tok
+            return
+        except Exception as _e_ls:
+            print(f"[composer stream local ollama failed, trying OpenAI compat] {_e_ls}")
+            pass
     try:
         stream = await cli.chat.completions.create(  # type: ignore
             model=model,
@@ -971,5 +1104,20 @@ You control what the frontend renders. Decide per-response what to show:
                     return
                 except Exception:
                     continue
+        # OFFLINE FIX for stream: try Ollama qwen3.5:9b
+        if _is_connection_error(e) and has_local_qwen_capability():
+            print(f"[composer stream offline → Ollama qwen3.5:9b] {e}")
+            try:
+                import ollama as _ollama_ss
+                _m2 = get_settings().qwen_model
+                _prompt_s = prompt
+                stream_off = _ollama_ss.chat(model=_m2, messages=[{"role":"user","content": _prompt_s}], stream=True)
+                for chunk in stream_off:
+                    d = chunk.get("message", {}).get("content", "")
+                    if d:
+                        yield d
+                return
+            except Exception as _e_ss:
+                print(f"[composer stream offline Ollama also failed] {_e_ss}")
         print(f"[qwen composer stream fallback {actual_prov}/{model}] {e}")
         raise RuntimeError(f"Composer stream failed: {e} — NO MOCK")

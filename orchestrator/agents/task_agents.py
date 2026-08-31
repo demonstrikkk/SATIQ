@@ -116,23 +116,45 @@ def task_agent_node(state: GraphState) -> GraphState:
             ".",
         ]
         for cand in uniq:
+            # Handle absolute Windows paths directly (S2 patch dirs like C:\coding\sih\...)
+            if Path(cand).is_absolute():
+                if Path(cand).exists():
+                    return str(Path(cand))
+                # Also try without drive letter funk
+                continue
             for base in search_bases:
                 p = Path(base) / cand
-                if p.exists() and p.is_file():
+                if p.exists():
                     return str(p)
-                # Also try recursive ingest: orchestrator/storage/ingest/**/cand
+                # Also try recursive ingest: orchestrator/storage/ingest/**/cand (only for relative patterns)
                 if base in ("orchestrator/storage", "storage"):
-                    for found in Path(base).rglob(cand):
-                        if found.is_file():
-                            return str(found)
-                    # Try stem match: find any .tif under ingest with same stem
-                    stem = Path(cand).stem
-                    for found in Path(base).rglob(f"{stem}.tif"):
-                        if found.is_file():
-                            return str(found)
-            # Direct path
-            if Path(cand).exists() and Path(cand).is_file():
-                return cand
+                    # Only use rglob with relative patterns (not absolute)
+                    if not Path(cand).is_absolute():
+                        try:
+                            for found in Path(base).rglob(cand):
+                                if found.exists():
+                                    return str(found)
+                        except ValueError:
+                            # Non-relative pattern unsupported for rglob with Windows absolute path
+                            pass
+                        # Try stem match: find any .tif under ingest with same stem
+                        stem = Path(cand).stem
+                        try:
+                            for found in Path(base).rglob(f"{stem}.tif"):
+                                if found.is_file():
+                                    return str(found)
+                        except ValueError:
+                            pass
+                        # For S2 patch dirs that are directories, also try glob for the dir itself
+                        try:
+                            for found in Path(base).rglob(f"{stem}*"):
+                                if found.exists() and found.is_dir():
+                                    return str(found)
+                        except ValueError:
+                            pass
+            # Direct path (handles absolute S2 patch dirs)
+            if Path(cand).exists():
+                return str(Path(cand))
             # Gateway static URL fallback: download to temp if gateway is running
             if cand.endswith(".png") or cand.endswith(".tif") or "." not in cand:
                 for gw_base in ["http://127.0.0.1:4000", "http://localhost:4000"]:
