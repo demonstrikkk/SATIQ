@@ -186,6 +186,29 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
             # pass through task_output details
             await _broadcast(session_id, "model_done", {"model": model_name, **{k:v for k,v in task_output.items() if k not in ("fused_repr","embeddings")}, "status": "OK" if not result_state.get("error") else "FAILED"})
 
+            # ALWAYS SHOW IN CHAT: which of the 4 models LLM called + raw output (so user sees all models)
+            try:
+                import json as _j
+                # Map task_type to the 4 models
+                model_map_full = {
+                    "vqa": "Model 1 — GeoChat-7B (VQA) `C:/coding/sih/final_model_1/final_model_1/merged_model`",
+                    "captioning": "Model 1 — GeoChat-7B (Captioning)",
+                    "grounding": "Model 2 — GroundingDINO+SAM (Grounding) `C:/coding/sih/model2_grounding`",
+                    "change_vqa": "Model 3 — Change-VQA Hybrid (NDVI/NDBI/NDWI + Vicuna) `C:/coding/sih/model3_change_vqa`",
+                    "optical_sar_fusion": "Model 4 — CROMA Fusion (Optical-SAR) `C:/coding/sih/model_4`",
+                }
+                model_label = model_map_full.get(task_type, f"Model — {model_name} ({task_type})")
+                # Build compact raw output for chat (avoid huge embeddings)
+                raw_out = {k: v for k, v in task_output.items() if k not in ("fused_repr","embeddings","_embeddings_raw","spatial_cam","top_cam")}
+                # stringify with limit
+                raw_str = _j.dumps(raw_out, indent=2, default=str)
+                if len(raw_str) > 3500: raw_str = raw_str[:3500] + "\n... (truncated)"
+                md = f"\n\n> **🤖 LLM routed → {model_label}**\n> **Task:** `{task_type}` **Model:** `{model_name}` **Status:** `{'OK' if not result_state.get('error') else 'FAILED'}`\n\n**📤 Model Raw Output:**\n```json\n{raw_str}\n```\n\n**📝 Model Answer Text:**\n> {task_output.get('answer_text','')[:1200]}"
+                await _broadcast(session_id, "answer_delta", {"chunk": md})
+                await asyncio.sleep(0.05)
+            except Exception as _e_m:
+                print(f"[model_trace] failed {_e_m}")
+
             # STEP-BY-STEP VISUALS: broadcast every model artifact as inline chat image (data:) so frontend StreamMarkdown SingleImageBlock shows it
             print(f"[visuals] task_type={task_type} image_ids={image_ids} artifacts={(task_output.get('artifacts') or [])[:2]}")
             try:
