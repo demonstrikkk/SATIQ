@@ -2,24 +2,24 @@
 from __future__ import annotations
 import time
 
-# Per-node budgets (ms), total ~15s — tune against real hardware via profiling.
+# Per-node budgets (ms) — NO TIME LIMIT for demo (user request: remove time limit in complete timeline)
 BUDGETS_MS: dict[str, int] = {
-    "input_validator": 200,
-    "preprocessing": 2000,
-    "encoder_selector": 200,
-    "encoder_compat": 200,
-    "coreg_gate": 300,
-    "vision_encoder": 4000,
-    "fusion": 6000,
-    "task_agent": 2000,
-    "tile_manager": 500,
-    "post_processing": 500,
-    "response_composer": 600,
-    "error_handler": 200,
-    "router": 800,
-    "planner": 1000,
+    "input_validator": 300000,
+    "preprocessing": 300000,
+    "encoder_selector": 300000,
+    "encoder_compat": 300000,
+    "coreg_gate": 300000,
+    "vision_encoder": 300000,
+    "fusion": 300000,
+    "task_agent": 300000,
+    "tile_manager": 300000,
+    "post_processing": 300000,
+    "response_composer": 300000,
+    "error_handler": 300000,
+    "router": 300000,
+    "planner": 300000,
 }
-TOTAL_BUDGET_MS = 15000
+TOTAL_BUDGET_MS = 300000
 
 def _now_ms() -> int:
     return int(time.time() * 1000)

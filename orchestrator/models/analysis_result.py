@@ -22,7 +22,7 @@ class AnalysisResult(BaseModel):
     task: TaskType
     query: str
     answer_text: str
-    confidence: float = Field(ge=0, le=1)
+    confidence: Optional[float] = Field(default=None, ge=0, le=1, description="Real confidence or null per rule 7 — never invented")
     execution_trace: List[ExecutionTraceStep] = Field(default_factory=list)
     chart_spec: Optional[Dict[str, Any]] = None  # apexcharts spec if numeric
     # optional evidence fields — present depending on task
@@ -34,6 +34,11 @@ class AnalysisResult(BaseModel):
     per_modality_confidence: Optional[Dict[str, float]] = None
     answer_type: Optional[Literal["open","closed"]] = None
     answer_short: Optional[str] = None
+    # additive extensions for real models (§2b, §5) — preserve existing consumers
+    artifacts: Optional[List[Dict[str, Any]]] = Field(default=None, description="Visual evidence artifacts from visualisation_tool")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Pipeline mode, deltas, categories, etc.")
+    pipeline_mode: Optional[str] = Field(default=None, description="stage1_index_hybrid for change_vqa etc.")
+    error_code: Optional[str] = Field(default=None, description="MODEL_LOAD_ERROR etc. on failure")
 
 # Specific outputs matching dummy structures in prompt
 class VQAResult(BaseModel):
@@ -43,7 +48,7 @@ class VQAResult(BaseModel):
     answer_text: str
     answer_type: Literal["open","closed"] = "open"
     answer_short: Optional[str] = None
-    confidence: float = Field(ge=0, le=1)
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
 
 class GroundingResult(BaseModel):
     task: Literal["grounding"] = "grounding"
@@ -51,8 +56,10 @@ class GroundingResult(BaseModel):
     image_id: str
     bbox: List[float]  # xyxy normalized
     bbox_xyxy: List[int]
-    confidence: float
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
     mask_rle: Optional[str] = None
+    artifacts: Optional[List[Dict[str, Any]]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 class ChangeVQAResult(BaseModel):
     task: Literal["change_vqa"] = "change_vqa"
@@ -62,7 +69,10 @@ class ChangeVQAResult(BaseModel):
     answer_text: str
     change_categories: List[str]
     change_mask_rle: Optional[str] = None
-    confidence: float
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    pipeline_mode: Optional[str] = None
+    artifacts: Optional[List[Dict[str, Any]]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 class FusionResult(BaseModel):
     task: Literal["optical_sar_fusion"] = "optical_sar_fusion"
@@ -70,5 +80,8 @@ class FusionResult(BaseModel):
     optical_image_id: str
     sar_image_id: str
     answer_text: str
-    class_map_rle: Dict[str, str]
-    per_modality_confidence: Dict[str, float]
+    class_map_rle: Optional[Dict[str, str]] = None
+    per_modality_confidence: Optional[Dict[str, float]] = None
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    artifacts: Optional[List[Dict[str, Any]]] = None
+    metadata: Optional[Dict[str, Any]] = None

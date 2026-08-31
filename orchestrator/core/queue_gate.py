@@ -7,9 +7,9 @@ import os
 import threading
 import time
 
-MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT_PIPELINES", "4"))
-# also support queue depth limit
-MAX_QUEUE_DEPTH = int(os.getenv("MAX_QUEUE_DEPTH", str(MAX_CONCURRENT)))
+MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT_PIPELINES", "8"))
+# also support queue depth limit — increased for demo sequential requests
+MAX_QUEUE_DEPTH = int(os.getenv("MAX_QUEUE_DEPTH", str(MAX_CONCURRENT * 2)))
 
 _active = 0
 _lock = threading.Lock()

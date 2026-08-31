@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     env: str = Field(default="development", alias="ENV")
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
+    # --- Capability checkpoints (real models) — §2/§3 ---
+    pretrained_dir: str = Field(default="capabilities/weights", alias="PRETRAINED_DIR")
+    gdino_config: str = Field(default="capabilities/single_image/weights/gdino_swinb.cfg", alias="GDINO_CONFIG")
+    gdino_weights: str = Field(default="capabilities/single_image/weights/gdino_swinb.pth", alias="GDINO_WEIGHTS")
+    vqa_weights: str = Field(default="capabilities/single_image/weights/rs_llava.pth", alias="VQA_WEIGHTS")
+    croma_weights: str = Field(default="capabilities/fusion/weights/croma.pth", alias="CROMA_WEIGHTS")
+    change_stage1_ckpt: str = Field(default="capabilities/temporal/weights/stage1_final.pth", alias="CHANGE_STAGE1_CKPT")
+    vicuna_weights: str = Field(default="capabilities/temporal/weights/vicuna-7b-v1.5", alias="VICUNA_WEIGHTS")
+    image_size: int = Field(default=224, alias="IMAGE_SIZE")
+    s2_percentile_low: float = Field(default=2.0, alias="S2_PERCENTILE_LOW")
+    s2_percentile_high: float = Field(default=98.0, alias="S2_PERCENTILE_HIGH")
 
     model_config = {"env_file": ".env", "extra": "ignore", "populate_by_name": True}
 

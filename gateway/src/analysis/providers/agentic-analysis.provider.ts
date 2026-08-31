@@ -116,9 +116,8 @@ export class AgenticAnalysisProvider implements AnalysisProvider {
     const seen = new Set<number>();
     let lastStatus: string | undefined;
     let attempts = 0;
-    // Poll budget: 150 * 1200ms ≈ 180s with real LLMs (no mock). Tighter than before
-    // so stuck runs fail fast and Stop is responsive.
-    const maxAttempts = Number(process.env.ORCH_POLL_MAX_ATTEMPTS ?? 150);
+    // NO TIME LIMIT for demo — poll indefinitely until completed/failed/cancelled
+    const maxAttempts = Number(process.env.ORCH_POLL_MAX_ATTEMPTS ?? 100000);
     while (attempts < maxAttempts) {
       if (signal.aborted) return;
       attempts++;

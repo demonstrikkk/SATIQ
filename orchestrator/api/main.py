@@ -151,7 +151,7 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
         # are captured by the UI bridge. Without this, every live token is
         # dropped and the answer never reaches the chat.
         await _broadcast(session_id, "composer_started", {"llm": _model})
-        # invoke LangGraph (router/planner emit thinking_delta; composer streams answer)
+        # NO TIME LIMIT for demo — pipeline runs without timeout (user request)
         result_state = await pipeline.ainvoke(state)  # type: ignore
 
         # extract trace to broadcast step-by-step for UI compatibility
@@ -301,12 +301,22 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
 
 @app.on_event("startup")
 async def startup():
+    # Non-blocking startup with timeout — never hang "Waiting for application startup" on laptop without docker
     try:
-        await init_db()
+        await asyncio.wait_for(init_db(), timeout=3.0)
+    except asyncio.TimeoutError:
+        print("[db] init timeout after 3s — using SQLite fallback, continuing")
     except Exception as e:
         print(f"[db] init skipped: {e}")
     try:
-        minio_client.ensure_buckets()
+        # MinIO may not be running locally (docker not installed); don't block
+        import concurrent.futures as _cf
+        with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+            fut = _ex.submit(minio_client.ensure_buckets)
+            try:
+                fut.result(timeout=2.0)
+            except _cf.TimeoutError:
+                print("[minio] ensure_buckets timeout — using disk fallback")
     except Exception:
         pass
 

@@ -2,7 +2,7 @@
 
 > Kanban + milestone view. Every task that writes/edits/deletes code must move a row here in the **same commit/PR** that changes code. Stale = incomplete.
 
-**Last updated:** 2026-08-30 · **Branch:** `main` · **Head:** `wip`
+**Last updated:** 2026-08-31 · **Branch:** `main` · **Head:** `wip`
 
 ## Milestones
 
@@ -10,9 +10,9 @@
 |-----------|-------|--------|-------|-----|-------|
 | M0 — Scaffold | Repo structure, compose, README, governance docs | **Done** | — | 2026-08-26 | `aa6fef2`, `5703720` |
 | M1 — Core Contracts | `raster_asset.py`, `analysis_result.py`, `validator.py` (CRS hard gate) | **Done** | — | 2026-08-29 | ADR 0004; Pydantic models + validator with CRS mismatch regression test |
-| M2 — Fusion (Model 4) | CROMA-based optical+SAR cross-attention, seg head, BigEarthNet S1+S2 | **Done (dummy)** | — | 2026-08-29 | ADR 0004; dummy CROMA + fusion (attention) + optical_sar_fusion task, chart spec, swappable |
-| M3 — Change (Model 3) | Change-VQA/Desc + change map, bi-temporal FM | **Done (dummy)** | — | 2026-08-29 | ADR 0004; dummy Prithvi + change_vqa task (`built-up_increase`) |
-| M4 — Single-Image (M1+M2) | RS-VQA (GeoChat) + Grounding (GroundingDINO+SAM) | **Done (dummy)** | — | 2026-08-29 | ADR 0004; dummy SatMAE/SSL4EO + VQA/Grounding with bbox, confidence |
+| M2 — Fusion (Model 4) | CROMA-based optical+SAR cross-attention, seg head, BigEarthNet S1+S2 | **Done (real wiring, blocked on checkpoint)** | — | 2026-08-31 | ADR 0007; real CROMA via `capabilities/fusion/optical_sar.py` + ModelManager, `MODEL_LOAD_ERROR` if `capabilities/fusion/weights/croma.pth` missing |
+| M3 — Change (Model 3) | Change-VQA/Desc + change map, bi-temporal FM | **Done (real hybrid)** | — | 2026-08-31 | ADR 0007; real stage1_index_hybrid `temporal/change_vqa.py` NDVI/NDBI/NDWI + fusion cosine + Vicuna 4-bit, `stage1_final.pth` + `visualisation_tool` change_map |
+| M4 — Single-Image (M1+M2) | RS-VQA (GeoChat) + Grounding (GroundingDINO+SAM) | **Done (real wiring, blocked on checkpoint)** | — | 2026-08-31 | ADR 0007; real GDINO S2 percentile stretch `single_image/grounding.py` + VQA `single_image/vqa.py`, ModelManager, `MODEL_LOAD_ERROR` if weights missing |
 | M5 — Orchestrator | `llm_planner`, `capability_registry`, `topo_resolver`, `execution_engine`, `evidence_graph`, `vlm_composer`, supervisor/critic loop | **Done** | — | 2026-08-29 | ADR 0004; 14-node LangGraph, mocked Qwen 3.5 9B (MOCK_QWEN=true), gates/retries, WS streaming, graph.png |
 | M6 — Gateway & Frontend | GeoTIFF upload, session, MapLibre workspace, ExecutionTrace inspector | **Done** | — | 2026-08-28 | ADR 0002, 0003; gateway + 12-phase frontend complete, mocked SSE + spatial multiturn verified |
 | M7 — Adaptation & Eval | BigEarthNet fine-tune (LoRA), VRSBench/RSVQA/CDVQA harness, PDF reports | Planned | — | — | — |
@@ -28,11 +28,12 @@
 | T-011 | Pydantic `analysis_result.py` (answer + evidence + confidence + trace) | M1 | **Done** | OpenCode | `wip` | 4 task shapes (VQA/Grounding/Change/Fusion) with confidence [0,1] |
 | T-012 | Deterministic validator — CRS hard gate + format/modality/pairing checks | M1 | **Done** | OpenCode | `wip` | `ingestion/validator.py` + `agents/input_validator` hard gate; pytest `test_validator.py` CRS mismatch→400 before LLM |
 | T-020 | Query normalizer | M5 | **Done** | OpenCode | `wip` | In `agents/router` + `llm_client` heuristic (asset-aware) |
-| T-030 | Model 4: CROMA fusion layer + seg head | M2 | **Done (dummy)** | OpenCode | `wip` | `dummy/dummy_encoders.run_croma` + `run_fusion` attention + `dummy_optical_sar_fusion` |
-| T-031 | Model 3: bi-temporal encoder + change map + CDVQA tuning | M3 | **Done (dummy)** | OpenCode | `wip` | `dummy/run_prithvi` + `dummy_change_vqa` |
-| T-032 | Model 1: RS-VQA projection + LoRA | M4 | **Done (dummy)** | OpenCode | `wip` | `dummy/run_satmae`/`run_ssl4eo` + `dummy_vqa` |
-| T-033 | Model 2: GroundingDINO + SAM mask | M4 | **Done (dummy)** | OpenCode | `wip` | `dummy/dummy_grounding` bbox_xyxy + normalized |
-| T-040 | Orchestrator planner (function-calling) | M5 | **Done** | OpenCode | `wip` | `agents/planner_agent` Qwen JSON StepPlan, MOCK_QWEN=true, mocked heuristic with `_mock:true` |
+| T-030 | Model 4: CROMA fusion layer + seg head | M2 | **Done (real)** | OpenCode | `wip` | `capabilities/fusion/optical_sar.py` CROMA real (ModelManager) + `MODEL_LOAD_ERROR` if missing; `dummy` kept as fallback docs |
+| T-031 | Model 3: bi-temporal encoder + change map + CDVQA tuning | M3 | **Done (real hybrid)** | OpenCode | `wip` | `temporal/change_vqa.py` stage1_index_hybrid (indices + fusion cosine + Vicuna 4-bit) + change_map PNG + `pipeline_mode` |
+| T-032 | Model 1: RS-VQA projection + LoRA | M4 | **Done (real)** | OpenCode | `wip` | `capabilities/single_image/vqa.py` RS-LLaVA real wiring + ModelManager `MODEL_LOAD_ERROR` |
+| T-033 | Model 2: GroundingDINO + SAM mask | M4 | **Done (real)** | OpenCode | `wip` | `capabilities/single_image/grounding.py` S2 percentile stretch verbatim + GDINO `scores` confidence + `MODEL_LOAD_ERROR` |
+| T-040 | Orchestrator planner (function-calling) | M5 | **Done** | OpenCode | `wip` | `agents/planner_agent` Qwen JSON StepPlan, MOCK_QWEN=true, mocked heuristic with `_mock:true` → now `LLM_PROVIDER=groq` live, no mock per ADR 0007 |
+| T-042 | Execution engine + result cache | M5 | **Done** | OpenCode | `wip` | `graph/pipeline.py` 14-node LangGraph + `core/redis_state` mem fallback + `api/main` BackgroundTasks |
 | T-041 | Capability registry + topo resolver | M5 | **Done** | OpenCode | `wip` | `agents/encoder_selector` rule-based + `encoder_compat` gate |
 | T-042 | Execution engine + result cache | M5 | **Done** | OpenCode | `wip` | `graph/pipeline.py` 14-node LangGraph + `core/redis_state` mem fallback + `api/main` BackgroundTasks |
 | T-043 | Evidence graph + confidence engine | M5 | **Done** | OpenCode | `wip` | `agents/tile_manager` + `evidence` via trace + `post_processing` conf gate |
@@ -57,6 +58,7 @@
 | T-079 | Observability trace summary + benchmark | M5 | **Done** | OpenCode | wip | `helpers/trace.py` bottleneck + `GET /session/{sid}/trace/summary` |
 | T-080 | Pipeline resilience (timeout, retry, circuit breaker, checkpoint, queue, TTL cache) | M5 | **Done** | OpenCode | wip | ADR 0005; `core/*` + `services/*` + `tests/` 10 cases 13 passed 1 skipped |
 | T-081 | Full integration frontend↔gateway↔orchestrator (agentic, mock LLM, Docker) | M6 | **Done** | OpenCode | wip | ADR 0006; `gateway` agentic provider, `frontend` analysisClient, `docker-compose` |
+| T-090 | Replace dummy/mocks with real models (4 capabilities + ModelManager + visualisation_tool) | M2-M4 | **Done** | OpenCode | `wip` | `capabilities/*` real wiring + `agents/task_agents.py` + `models/analysis_result.py` additive; `pytest 21 passed` (incl. 7 `test_real_models`), `npm run build` + `gateway typecheck` pass per ADR 0007 |
 
 **Statuses:** `Todo` → `In Progress` → `In Review` → `Done` · Mark `Blocked` if waiting on external (checkpoint, dataset).
 
@@ -67,7 +69,8 @@
 | Location | Stub | Reason | Created |
 |----------|------|--------|---------|
 | `gateway/src/routes/query.ts` | STUB_FALLBACK mock response | Fallback response when downstream orchestrator is not running or not implemented yet | 2026-08-28 |
-| `orchestrator/dummy/*` | STUB_MOCK vision (SatMAE/SSL4EO/Prithvi/CROMA) + fusion + 4 task heads | Dummy embeddings 768/1024-d via seeded RNG; real checkpoints replace these 3 files only | 2026-08-29 |
+| `orchestrator/dummy/*` | STUB_MOCK vision (SatMAE/SSL4EO/Prithvi/CROMA) + fusion + 4 task heads | Dummy embeddings 768/1024-d via seeded RNG; real checkpoints now in `capabilities/*/weights/` (see ADR 0007) — `dummy/*` kept as docs/fallback only | 2026-08-29 |
+| `capabilities/*/weights/*` | Wired but blocked | Real models wired via `ModelManager`; `MODEL_LOAD_ERROR` until `.pth` dropped in `capabilities/single_image/weights/`, `capabilities/temporal/weights/stage1_final.pth`, `capabilities/fusion/weights/croma.pth` | 2026-08-31 |
 | `orchestrator/core/llm_client.py` | STUB_MOCK Qwen 3.5 9B (`MOCK_QWEN=true`) | Heuristic router/planner/composer with `_mock:true` marker; flip to `false` + `ollama pull qwen3:8b` for real LLM | 2026-08-29 |
 | `orchestrator/services/tiling.py` | STUB dummy tiling (1 tile) | Real rasterio windowed tiling deferred (needs gdal); interface stable | 2026-08-29 |
 | `orchestrator/services/minio_client.py` | STUB disk fallback | MinIO not required locally; `storage/` used when MinIO unreachable | 2026-08-29 |

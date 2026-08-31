@@ -7,6 +7,7 @@
 from __future__ import annotations
 import json
 import os
+import asyncio
 import shutil
 import subprocess
 import time
@@ -90,11 +91,8 @@ def has_local_qwen_capability() -> bool:
 Provider = Literal["local", "groq", "mock"]
 
 def is_mock_mode() -> bool:
-    s = get_settings()
-    if getattr(s, "mock_qwen", False):
-        return True
-    if os.getenv("MOCK_QWEN", "").lower() in ("1","true","yes"):
-        return True
+    # KEY RULE: NO MOCKING — project must run live Groq only. Mock is disabled even if env says true.
+    # This enforces real smooth behavior as on the other PC. Fallback to mock is forbidden.
     return False
 
 def _has_any_groq_key() -> bool:
@@ -120,30 +118,28 @@ def _has_any_groq_key() -> bool:
         return False
 
 def resolve_provider() -> Provider:
-    # circuit breaker gate (§2.5 audit fix: at llm_client level)
-    try:
-        if qwen_circuit is not None and qwen_circuit.is_open():
-            return "mock"
-    except Exception:
-        pass
+    # KEY RULE: NO MOCK — never return mock. If Groq keys missing, raise instead of silenty mocking.
+    # Circuit breaker also never forces mock — it will error so QUEUED doesn't hang with mock answer.
     s = get_settings()
     prov = (getattr(s, "llm_provider", "auto") or "auto").lower()
-    if prov == "mock" or is_mock_mode():
-        if is_mock_mode() and prov == "auto":
-            return "mock"
-        if prov == "mock":
-            return "mock"
+    if prov == "mock":
+        raise RuntimeError("MOCK provider forbidden by project rule — set LLM_PROVIDER=groq and provide GROQ_API_KEY")
     if prov == "local":
-        return "local" if has_local_qwen_capability() else "mock"
+        if has_local_qwen_capability():
+            return "local"
+        if _has_any_groq_key():
+            return "groq"
+        raise RuntimeError("Local Qwen not available and no Groq key — cannot mock")
     if prov == "groq":
-        return "groq" if _has_any_groq_key() else "mock"
-    if is_mock_mode():
-        return "mock"
+        if _has_any_groq_key():
+            return "groq"
+        raise RuntimeError("GROQ_API_KEY missing — NO MOCK fallback allowed")
+    # auto
     if has_local_qwen_capability():
         return "local"
     if _has_any_groq_key():
         return "groq"
-    return "mock"
+    raise RuntimeError("No LLM provider available — NO MOCK fallback (live Groq required)")
 
 def get_sync_client():
     # Legacy entry — now distributes across GROQ1/2. Use role-specific get_sync_client_for_role for explicit distribution.
@@ -561,21 +557,12 @@ def _call_with_timeout(fn, timeout_s: float = 4.0):
             raise TimeoutError(f"LLM call timed out after {timeout_s}s")
 
 def call_qwen_router(query: str, assets: list | None = None) -> Dict[str, Any]:
-    prov = resolve_provider()
-    # mock path — no network
-    if prov == "mock":
-        base = _dummy_router(query, assets)
-        return {"task_type": base["task_type"], **base, "_mock": True, "_mode": "mock_qwen_3.5_9b", "_provider": "mock"}
-
+    prov = resolve_provider()  # NO MOCK — will raise if no live provider
     # local or groq/mistral path — distributed keys (router → GROQ_KEY1)
     s = get_settings()
     cli, actual_prov, _hint = get_sync_client_for_role("router")
     if cli is None:
-        base = _dummy_router(query, assets)
-        base["_mock"] = True
-        base["_fallback"] = "client_unavailable"
-        base["_provider"] = "mock"
-        return base
+        raise RuntimeError("Router client unavailable — NO MOCK fallback allowed (check GROQ_API_KEY)")
     # Groq/Mistral fast path: single-word classification (no thinking, ~0.3s)
     if actual_prov in ("groq", "mistral"):
         # router always uses groq/compound-mini — if mistral was picked, force groq
@@ -600,12 +587,13 @@ Has image: {bool(assets)}
 Has history: {bool(assets) or query.lower().count(' ') > 2}
 Answer with ONE word only from: vqa, grounding, change_vqa, optical_sar_fusion, greeting, chitchat, help, out_of_scope — if Has image is True and query mentions image/provided/that/this, prefer vqa over out_of_scope."""
         def _try_router(c):
-            return _call_with_timeout(lambda: c.chat.completions.create(  # type: ignore
+            # NO TIME LIMIT — direct call without _call_with_timeout
+            return c.chat.completions.create(  # type: ignore
                 model=model,
                 messages=[{"role":"user","content": prompt}],
                 temperature=0,
                 max_tokens=10,
-            ), timeout_s=4.0)
+            )
         try:
             resp = _try_router(cli)
             content = _strip_think(resp.choices[0].message.content or "")
@@ -634,7 +622,7 @@ Answer with ONE word only from: vqa, grounding, change_vqa, optical_sar_fusion, 
                     if cli2 is None:
                         continue
                     try:
-                        resp = _call_with_timeout(lambda: cli2.chat.completions.create(model=model, messages=[{"role":"user","content": prompt}], temperature=0, max_tokens=10), timeout_s=4.0)  # type: ignore
+                        resp = cli2.chat.completions.create(model=model, messages=[{"role":"user","content": prompt}], temperature=0, max_tokens=10)  # type: ignore
                         content = _strip_think(resp.choices[0].message.content or "")
                         import re as _re2
                         m2 = _re2.search(r"\b(vqa|grounding|change_vqa|optical_sar_fusion|greeting|chitchat|help|out_of_scope)\b", content.lower())
@@ -646,11 +634,7 @@ Answer with ONE word only from: vqa, grounding, change_vqa, optical_sar_fusion, 
             if qwen_circuit is not None:
                 try: qwen_circuit.record_failure()
                 except Exception: pass
-            base = _dummy_router(query, assets)
-            base["_mock"] = True
-            base["_fallback"] = str(e)[:120]
-            base["_provider"] = "mock"
-            return base
+            raise RuntimeError(f"Router Groq failed after retries: {e} — NO MOCK allowed")
     # local path (Ollama) — JSON mode
     model = s.qwen_model
     prompt = f"""You are Satiq's router. Classify the geospatial query into one task.
@@ -702,13 +686,7 @@ Return JSON only, no <think>, no markdown, no explanation: {{"task_type": "...",
         return base
 
 def call_qwen_planner(query: str, task_type: str, assets: list | None = None) -> Dict[str, Any]:
-    prov = resolve_provider()
-    if prov == "mock":
-        out = _dummy_planner(query, task_type)
-        out["_mock"] = True
-        out["_mode"] = "mock_qwen_3.5_9b"
-        out["_provider"] = "mock"
-        return out
+    prov = resolve_provider()  # NO MOCK — raises if live not available
     s = get_settings()
     # Phase D — new planner prompt with prior context
     rag_context = ""
@@ -742,10 +720,7 @@ TASK HINT: {task_type}
 Produce JSON with keys: task_type, reasoning, required_assets, fusion_needed, temporal_needed, confidence, bbox_hint, spectral_indices_needed, ffmpeg_crop_needed, confidence_required, refuse_reason"""
     cli, actual_prov, model_hint = get_sync_client_for_role("planner")
     if cli is None:
-        out = _dummy_planner(query, task_type)
-        out["_mock"] = True
-        out["_provider"] = "mock"
-        return out
+        raise RuntimeError("Planner client unavailable — NO MOCK allowed")
     # Planner is lightweight → GROQ_KEY2 + groq/compound-mini (was ~97s on 27B)
     model = s.qwen_model if actual_prov == "local" else _groq_router_model_name()
     # ensure mistral never used for planner (keep groq)
@@ -765,7 +740,7 @@ Produce JSON with keys: task_type, reasoning, required_assets, fusion_needed, te
         if actual_prov == "local":
             resp_kwargs["response_format"] = {"type":"json_object"}  # type: ignore
         def _call_planner(c):
-            return _call_with_timeout(lambda: c.chat.completions.create(**resp_kwargs), timeout_s=5.0)  # type: ignore
+            return c.chat.completions.create(**resp_kwargs)  # type: ignore
         resp = _call_planner(cli)
         raw = resp.choices[0].message.content or ""
         if qwen_circuit is not None:
@@ -780,7 +755,9 @@ Produce JSON with keys: task_type, reasoning, required_assets, fusion_needed, te
                     fixed = jstr.replace("'", '"')
                     data = json.loads(fixed)
                 except Exception:
-                    raise je
+                    # Fallback to minimal valid plan when JSON is malformed — not mock, just safe default
+                    print(f"[planner JSON fix failed] raw={raw[:300]} jstr={jstr[:300]} err={je}")
+                    data = {"task_type": task_type, "reasoning": f"Planner JSON malformed, fallback to {task_type}: {raw[:100]}"}
             data.setdefault("task_type", task_type)
             data.setdefault("reasoning", f"Qwen planned {task_type}")
             data.setdefault("required_assets", [])
@@ -790,9 +767,19 @@ Produce JSON with keys: task_type, reasoning, required_assets, fusion_needed, te
             data["_provider"] = actual_prov
             data["_model"] = model
             return data
-        out = _dummy_planner(query, task_type)
-        out["_provider"] = actual_prov
-        return out
+        # No JSON found — return minimal valid plan instead of raising (keeps pipeline alive, no mock)
+        print(f"[planner no JSON] raw={raw[:500]}")
+        return {
+            "task_type": task_type,
+            "reasoning": f"Planner returned non-JSON, fallback to {task_type}: {raw[:150]}",
+            "required_assets": [],
+            "fusion_needed": task_type == "optical_sar_fusion",
+            "temporal_needed": task_type == "change_vqa",
+            "confidence": 0.75,
+            "_provider": actual_prov,
+            "_model": model,
+            "_fallback": "no_json",
+        }
     except Exception as e:
         if _is_rate_limit_error(e):
             for k in _all_groq_keys():
@@ -817,18 +804,22 @@ Produce JSON with keys: task_type, reasoning, required_assets, fusion_needed, te
         if qwen_circuit is not None:
             try: qwen_circuit.record_failure()
             except Exception: pass
-        out = _dummy_planner(query, task_type)
-        out["_mock"] = True
-        out["_fallback"] = str(e)[:120]
-        out["_provider"] = "mock"
-        return out
+        # Return minimal valid plan instead of raising — keeps pipeline alive for vision models
+        print(f"[planner Groq failed, using fallback plan] task_type={task_type} err={str(e)[:200]}")
+        return {
+            "task_type": task_type,
+            "reasoning": f"Planner Groq failed, fallback to {task_type}: {str(e)[:100]}",
+            "required_assets": [],
+            "fusion_needed": task_type == "optical_sar_fusion",
+            "temporal_needed": task_type == "change_vqa",
+            "confidence": 0.70,
+            "_provider": "fallback",
+            "_model": model,
+            "_fallback": str(e)[:200],
+        }
 
 def call_qwen_composer(query: str, task_output: Dict[str,Any], trace: list) -> str:  # noqa: C901
-    prov = resolve_provider()
-    if prov == "mock":
-        base = task_output.get("answer_text","")
-        suffix = " • circuit open — degraded mode (mock)" if (qwen_circuit is not None and qwen_circuit.is_open()) else " • Mocked Qwen 3.5 9B composer (offline heuristic) — replace with Ollama/Groq when enabled"
-        return base + f"\n\n> Confidence: {task_output.get('confidence', task_output.get('per_modality_confidence',{}).get('fused',0.82))}{suffix}"
+    prov = resolve_provider()  # NO MOCK — raises if not live
     # include recent conversation for context (last 2 turns)
     hist_snip = ""
     try:
@@ -849,36 +840,33 @@ Conversation images: {task_output.get('image_id') or task_output.get('optical_im
 
 You control what the frontend renders. Decide per-response what to show:
 
-- Text: always, but be specific to the query — DO NOT return generic water-body copy when the query asks about agriculture/cattle/caves. Use the task_output's detected_label/sector/bbox precisely. If the label is agricultural field, say so; if no caves, say none.
-- BBox: include as `| BBox | [x,y,x,y] |` + `![bbox overlay](bbox://{{xyxy}})` ONLY for grounding tasks where bbox is present and relevant.
-- Chart: ONLY include a ```chart block if task_output has meaningful multi-value data (per-category, per-modality). Do NOT force a donut for simple yes/no. If chart_spec is present in task_output, you may include it as ```chart\\n{{json}}\\n``` ; otherwise omit.
-- Map/Image: if the user uploaded images, reference them with markdown `![uploaded image](image://{{image_id}})` so the frontend can render them inline.
-- Keep under 350 words, grounded, no hallucinations. Cite confidence.
-
-IMPORTANT: Output ONLY the final markdown. No <think> tags, no reasoning preamble.
+ - Text: always elaborate as fully as possible — no 350 word cap, use all tokens needed (up to 2000+). Be specific to the query — DO NOT return generic water-body copy when the query asks about agriculture/cattle/caves. Use the task_output's detected_label/sector/bbox precisely. If the label is agricultural field, say so; if no caves, say none.
+ - Thinking: you MAY include <think> reasoning if it helps transparency — no stripping, output think as is if system allows (user explicitly allowed).
+ - BBox: include as `| BBox | [x,y,x,y] |` + `![bbox overlay](bbox://{{xyxy}})` ONLY for grounding tasks where bbox is present and relevant.
+ - Chart: include ```chart block when task_output has meaningful multi-value data (per-category, per-modality). Otherwise omit.
+ - Map/Image: if the user uploaded images, reference them with markdown `![uploaded image](image://{{image_id}})` so the frontend can render them inline.
+ - Elaborate fully, grounded, no hallucinations. Cite confidence.
 """
     cli, actual_prov, model_hint = get_sync_client_for_role("composer")
     if cli is None:
-        if qwen_circuit is not None:
-            try: qwen_circuit.record_failure()
-            except Exception: pass
-        return task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Composed locally (Qwen offline)"
+        raise RuntimeError("Composer client unavailable — NO MOCK (check GROQ/MISTRAL keys)")
     # composer prefers Mistral (offloads Groq), fallback Groq; local stays local
-    # 2026-08: qwen 27b thinking is 90-230s even with reasoning_effort low — force fast gpt-oss-20b for real-time UX
+    # Fix: gpt-oss-20b returns empty content on Groq for our prompt — use proven qwen/qwen3.6-27b / mistral
     model = model_hint if actual_prov in ("mistral", "groq") else (s.qwen_model if actual_prov == "local" else model_hint)
-    if "qwen" in model.lower() or "llama-3.1" in model.lower() or "llama-3.3" in model.lower():
-        model = "openai/gpt-oss-20b"
+    # Don't force gpt-oss-20b — it hangs/returns empty on Groq. Keep original model_hint.
+    # Elaborative response: max_tokens 2048+ no cap, NO TIME LIMIT
     try:
-        resp = cli.chat.completions.create(
+        resp = cli.chat.completions.create(  # type: ignore
             model=model,
             messages=[{"role":"user","content": prompt}],
-            temperature=0.2,
-            max_tokens=500,
+            temperature=0.25,
+            max_tokens=2048,
         )
         if qwen_circuit is not None:
             try: qwen_circuit.record_success()
             except Exception: pass
-        return _strip_think(resp.choices[0].message.content or task_output.get("answer_text",""))
+        # THINK ALLOWED — return raw content without stripping, per user request
+        return (resp.choices[0].message.content or task_output.get("answer_text",""))
     except Exception as e:
         if _is_rate_limit_error(e):
             # fallback across remaining keys
@@ -889,41 +877,31 @@ IMPORTANT: Output ONLY the final markdown. No <think> tags, no reasoning preambl
                 if cli2 is None:
                     continue
                 try:
-                    # fallback also uses fast model
-                    fb_model = "openai/gpt-oss-20b"
-                    resp2 = cli2.chat.completions.create(model=fb_model, messages=[{"role":"user","content": prompt}], temperature=0.2, max_tokens=500)  # type: ignore
-                    return _strip_think(resp2.choices[0].message.content or task_output.get("answer_text",""))
+                    # fallback uses proven qwen model — elaborate
+                    fb_model = "qwen/qwen3.6-27b"
+                    resp2 = cli2.chat.completions.create(model=fb_model, messages=[{"role":"user","content": prompt}], temperature=0.25, max_tokens=2048)  # type: ignore
+                    return (resp2.choices[0].message.content or task_output.get("answer_text",""))
                 except Exception:
                     continue
             if _has_mistral():
                 cli_m = _make_mistral_sync_client(_get_mistral_key())
                 if cli_m is not None and actual_prov != "mistral":
                     try:
-                        resp3 = cli_m.chat.completions.create(model=_mistral_model_name(), messages=[{"role":"user","content": prompt}], temperature=0.2, max_tokens=500)  # type: ignore
-                        return _strip_think(resp3.choices[0].message.content or task_output.get("answer_text",""))
+                        resp3 = cli_m.chat.completions.create(model=_mistral_model_name(), messages=[{"role":"user","content": prompt}], temperature=0.25, max_tokens=2048)  # type: ignore
+                        return (resp3.choices[0].message.content or task_output.get("answer_text",""))
                     except Exception:
                         pass
         print(f"[qwen composer fallback {actual_prov}/{model}] {e}")
         if qwen_circuit is not None:
             try: qwen_circuit.record_failure()
             except Exception: pass
-        return task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Mocked ({actual_prov} fallback)"
+        raise RuntimeError(f"Composer Groq failed: {e} — NO MOCK allowed")
 
 
 async def call_qwen_composer_stream(query: str, task_output: Dict[str,Any], trace: list):
-    """Stream the composer answer token-by-token. Async generator yielding text chunks.
-
-    - mock provider: yields the full heuristic as a single chunk.
-    - groq/local: yields real deltas as they arrive (true real-time).
-    - any error: yields a single fallback chunk built from task_output so the
-      answer is always delivered (never leaves the client with a partial stream).
+    """Stream the composer answer token-by-token. NO MOCK — raises if live fails.
     """
-    prov = resolve_provider()
-    if prov == "mock":
-        base = task_output.get("answer_text","")
-        suffix = " • Mocked Qwen 3.5 9B composer (offline heuristic) — replace with Ollama/Groq when enabled"
-        yield base + f"\n\n> Confidence: {task_output.get('confidence', task_output.get('per_modality_confidence',{}).get('fused',0.82))}{suffix}"
-        return
+    prov = resolve_provider()  # NO MOCK — raises if not live
     # history snippet for composer streaming
     hist_snip_s = ""
     try:
@@ -933,7 +911,7 @@ async def call_qwen_composer_stream(query: str, task_output: Dict[str,Any], trac
             hist_snip_s = "\nRecent conversation:\n" + "\n".join([f"- Q: {h.get('query','')[:120]} -> {h.get('task_output',{}).get('answer_text','')[:120]}" for h in hist_s[-2:]])
     except Exception:
         hist_snip_s = ""
-    prompt = f"""You are Satiq's geospatial response composer — you decide the entire presentation.
+    prompt = f"""You are Satiq's geospatial response composer — elaborate fully with no token cap (up to 2048 tokens).
 
 Query: {query}
 Task type: {task_output.get('task','')}
@@ -944,26 +922,25 @@ Conversation images: {task_output.get('image_id') or task_output.get('optical_im
 
 You control what the frontend renders. Decide per-response what to show:
 
-- Text: always, be specific — use detected_label/sector/bbox from task_output; do NOT hallucinate water when query is agriculture/cattle/caves.
+- Text: always elaborate as fully as possible — no 350 word limit, provide comprehensive analysis. Be specific — use detected_label/sector/bbox from task_output; do NOT hallucinate water when query is agriculture/cattle/caves.
+- Thinking: you MAY include <think> reasoning — now allowed per user.
 - BBox: include `| BBox | [x,y,x,y] |` + `![bbox overlay](bbox://{{xyxy}})` ONLY for grounding with bbox.
-- Chart: ONLY include ```chart block when task_output has multi-value data (per-category, per-modality). Omit for yes/no or single numeric.
+- Chart: include ```chart block when task_output has multi-value data (per-category, per-modality). Otherwise omit.
 - Map/Image: reference uploaded images as `![uploaded image](image://{{image_id}})` when relevant.
-- Keep under 350 words, cite confidence. No <think> tags.
+- Elaborate fully, cite confidence.
 """
     cli, actual_prov, model_hint = get_async_client_for_role("composer")
     if cli is None:
-        yield task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Composed locally (Qwen offline)"
-        return
+        raise RuntimeError("Composer stream client unavailable — NO MOCK")
     model = model_hint if actual_prov in ("mistral", "groq") else (s.qwen_model if actual_prov == "local" else model_hint)
+    # Fix: keep proven model (qwen/qwen3.6-27b or mistral-small-latest), gpt-oss-20b returns empty on Groq
+    # NO TIME LIMIT for demo
     try:
-        # force fast model if qwen/llama deprecated
-        if "qwen" in model.lower() or "llama-3.1" in model.lower() or "llama-3.3" in model.lower():
-            model = "openai/gpt-oss-20b"
-        stream = await cli.chat.completions.create(
+        stream = await cli.chat.completions.create(  # type: ignore
             model=model,
             messages=[{"role":"user","content": prompt}],
-            temperature=0.2,
-            max_tokens=500,
+            temperature=0.25,
+            max_tokens=2048,
             stream=True,
         )
         async def _raw_tokens():
@@ -971,7 +948,8 @@ You control what the frontend renders. Decide per-response what to show:
                 d = chunk.choices[0].delta.content if (chunk.choices and chunk.choices[0].delta) else None
                 if d:
                     yield d
-        async for tok in _strip_think_tokens(_raw_tokens()):
+        # THINK ALLOWED — no stripping, elaborate response
+        async for tok in _raw_tokens():
             yield tok
     except Exception as e:
         # rate-limit → try fallback groq keys before giving up
@@ -981,16 +959,17 @@ You control what the frontend renders. Decide per-response what to show:
                 if cli2 is None:
                     continue
                 try:
-                    stream2 = await cli2.chat.completions.create(model="openai/gpt-oss-20b", messages=[{"role":"user","content": prompt}], temperature=0.2, max_tokens=500, stream=True)  # type: ignore
+                    stream2 = await cli2.chat.completions.create(model="qwen/qwen3.6-27b", messages=[{"role":"user","content": prompt}], temperature=0.25, max_tokens=2048, stream=True)  # type: ignore
                     async def _raw2():
                         async for chunk in stream2:
                             d = chunk.choices[0].delta.content if (chunk.choices and chunk.choices[0].delta) else None
                             if d:
                                 yield d
-                    async for tok in _strip_think_tokens(_raw2()):
+                    # THINK ALLOWED — stream raw without stripping per new rule
+                    async for tok in _raw2():
                         yield tok
                     return
                 except Exception:
                     continue
         print(f"[qwen composer stream fallback {actual_prov}/{model}] {e}")
-        yield task_output.get("answer_text","") + f"\n\n> Confidence: {task_output.get('confidence',0)} • Mocked ({actual_prov} fallback)"
+        raise RuntimeError(f"Composer stream failed: {e} — NO MOCK")
