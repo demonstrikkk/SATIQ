@@ -585,20 +585,20 @@ def call_qwen_router(query: str, assets: list | None = None) -> Dict[str, Any]:
             cli = _make_groq_sync_client(gkey) if gkey else cli
             actual_prov = "groq"
         model = _groq_router_model_name()
-        prompt = f"""You are Satiq's router. The application ONLY handles geospatial work related to satellite imagery: water/land/forest/agriculture/buildings/urban/change detection/SAR/optical/NDVI/NDWI/spectral/vegetation etc. Label EVERYTHING ELSE as out_of_scope — do not answer it, just redirect.
+        prompt = f"""You are Satiq's router. The application ONLY handles geospatial work related to satellite imagery: water/land/forest/agriculture/buildings/urban/change detection/SAR/optical/NDVI/NDWI/spectral/vegetation etc.
 
-Classify into ONE word:
-- greeting: short hi/hello/thanks/bye
-- help: what can you do / how to use / capabilities (within premises, about the app)
+Classify into ONE word, but be lenient for followups with image:
+- greeting: short hi/hello/thanks/bye alone (no task)
+- help: what can you do / how to use / capabilities
 - chitchat: geospatial knowledge without image that IS within premises (what is NDVI? explain NDVI) — can answer as text
-- out_of_scope: EVERYTHING outside project ideals — casual chat (yo pep how you doing), math/homework (solve 4x+3y, can you solve 4*8, arithmetic), general knowledge not about geospatial, forecasting, etc. — must redirect
-- vqa/grounding/change_vqa/optical_sar_fusion: needs image analysis (detect, where, how many, compare, SAR/optical with image)
+- out_of_scope: ONLY if clearly outside premises AND no image context — math/homework (solve 4x+3y), casual "how you doing" without image/geo, general non-geospatial. If query is vague like "provide info regarding the provided image" AND Has image is True, then it IS geospatial -> choose vqa
+- vqa/grounding/change_vqa/optical_sar_fusion: needs image analysis (detect, where, how many, compare, SAR/optical, or vague "provide info" WITH image)
 
 Query: "{query}"
 Assets modalities: {[a.get('modality') for a in (assets or [])]}
 Has image: {bool(assets)}
-Conversation has history: {bool(query)}
-Answer with ONE word only from: vqa, grounding, change_vqa, optical_sar_fusion, greeting, chitchat, help, out_of_scope — strict, no extra text. If in doubt and not clearly geospatial, choose out_of_scope."""
+Has history: {bool(assets) or query.lower().count(' ') > 2}
+Answer with ONE word only from: vqa, grounding, change_vqa, optical_sar_fusion, greeting, chitchat, help, out_of_scope — if Has image is True and query mentions image/provided/that/this, prefer vqa over out_of_scope."""
         def _try_router(c):
             return _call_with_timeout(lambda: c.chat.completions.create(  # type: ignore
                 model=model,

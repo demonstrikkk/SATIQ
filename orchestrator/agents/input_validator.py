@@ -95,24 +95,29 @@ def input_validator_node(state: GraphState) -> GraphState:
         ("5x" in ql_no_space and "2y" in ql_no_space) or
         ("solve" in ql_norm and any(c in ql_norm for c in ["+", "=", "x", "y"]) and any(ch.isdigit() for ch in ql_norm))
     )
-    # Also generic arithmetic without geospatial image: "can you solve 4*8", "calculate 2+2"
-    if has_math_pattern and not has_image:
-        # No geospatial terms like water/forest/ndvi, and has math → out_of_scope
-        # Check if query is primarily math/homework (not a trick like "detect water where 4x is...") 
-        # If it contains homework/math and no strong geospatial need, treat as out_of_scope
-        has_geospatial_signal = any(h in ql_norm for h in ["water", "forest", "land", "agricult", "building", "change", "detect", "image", "scene", "ndvi", "sar", "optical"])
-        if not has_geospatial_signal or "homework" in ql_norm:
-            state["query_intent"] = "out_of_scope"  # type: ignore
-            state["error"] = "I can only help with geospatial queries related to satellite imagery (like detecting water, land cover, change detection, or explaining NDVI). Please ask a question within the application's premises."
-            state["error_type"] = "permanent"
-            state["error_code"] = "out_of_scope"
-            state["validation_passed"] = False
-            lat = int((time.time()-t0)*1000)
-            state.setdefault("node_latencies", {})["input_validator"] = lat  # type: ignore
-            add_trace(state, "input_validator", "failed", {"reason": "out_of_scope_fastpath_homework", "query": query}, latency_ms=lat)
-            log_node("input_validator", state.get("request_key",""), "failed", lat, "permanent", {"reason":"out_of_scope"})
-            record_node_latency("input_validator", lat, "permanent")
-            return state
+    # Homework/math fast path — but NOT if it's a followup with image context (e.g., vague "provide info regarding the provided image")
+    # For followups with image/history, even vague queries should go to LLM, not directly out_of_scope
+    if has_math_pattern:
+        has_geospatial_signal = any(h in ql_norm for h in ["water", "forest", "land", "agricult", "building", "change", "detect", "image", "scene", "ndvi", "sar", "optical", "cave", "cattle", "pasture", "field", "settlement"])
+        # If has image/history and mentions image, don't treat as out_of_scope even if homework-like
+        is_followup_with_image = (has_image or has_history) and any(w in ql_norm for w in ["image", "provided", "previous", "that", "this"])
+        if is_followup_with_image and "homework" not in ql_norm:
+            pass  # let LLM decide, don't fast-path to out_of_scope
+        elif "homework" in ql_norm or not has_geospatial_signal:
+            # Check if it's truly math/homework and not a trick like "detect water where 4x is..."
+            # If it has homework or is primarily math (has digits and math symbols), treat as out_of_scope
+            if "homework" in ql_norm or (has_math_pattern and not has_geospatial_signal):
+                state["query_intent"] = "out_of_scope"  # type: ignore
+                state["error"] = "I can only help with geospatial queries related to satellite imagery (like detecting water, land cover, change detection, or explaining NDVI). Please ask a question within the application's premises."
+                state["error_type"] = "permanent"
+                state["error_code"] = "out_of_scope"
+                state["validation_passed"] = False
+                lat = int((time.time()-t0)*1000)
+                state.setdefault("node_latencies", {})["input_validator"] = lat  # type: ignore
+                add_trace(state, "input_validator", "failed", {"reason": "out_of_scope_fastpath_homework", "query": query}, latency_ms=lat)
+                log_node("input_validator", state.get("request_key",""), "failed", lat, "permanent", {"reason":"out_of_scope"})
+                record_node_latency("input_validator", lat, "permanent")
+                return state
     # For all other queries (including "yo pep, how you doing", "what does NDVI mean?"),
     # PASS validation and let the LLM router do generalizable classification.
     state["query_intent"] = "pending_llm"  # type: ignore
