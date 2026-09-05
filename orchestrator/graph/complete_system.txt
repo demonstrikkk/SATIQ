@@ -1,0 +1,38 @@
+
+COMPLETE SATIQ SYSTEM — 8-NODE ORCHESTRATOR + TOOLS + MEMORY + STORAGE + CACHE
+
+ LAYERS
+ ──────
+ [Frontend 5173] React/Vite/MapLibre ──► [Gateway 4000] Express ──► [Orchestrator 8000] FastAPI/LangGraph (Ollama qwen3.5:9b) ──► [Models model1-4 shims]
+        │                                      │                          │
+        │ Composer 100MB createObjectURL       │ upload duplex:half 60s   │ 8 nodes: input_validator → coreference → router → planner → task_agent → post_processing → error/response
+        │ StreamMarkdown ?bbox= parse          │ agentic dedup 32         │   router/planner: ROUTER_TOOLS 4 / REGISTERED_TOOLS 10 via ollama.chat tool_choice auto, to_thread
+        │ MapLibre bbox overlay                │ rateLimiter userId||ip   │   task_agent: VRAM_SEMAPHORE 2 + asyncio.to_thread → shim internal encoders (no external)
+        │ analysisClient abort-safe            │ keepAlive 70s            │   post_processing: conf≥0.6, bbox [0,1], chart real-only
+        └──────────────────────────────────────┴──────────────────────────┘   error_handler: MODEL_NOT_LINKED permanent / MODEL_INFERENCE_ERROR transient
+
+ TOOLS (helpers/tool_schemas.py) — exposed to Ollama via tools param
+  MODEL: run_vqa (GeoChat-7B) • run_grounding (GroundingDINO Swin-T 2-98%) • run_change_vqa (Prithvi+Vicuna) • run_fusion (CROMA 12+2)
+  DETERMINISTIC (6): compute_spectral_indices (fail-closed B04/B08) • calculate_area (bbox+gsd) • geocode_region (gazetteer) • crop_bbox (FFmpeg CPU -vf crop) • generate_visual_evidence • retrieve_history (Chroma top_k 3)
+
+ CAPABILITIES (capability_registry.py)
+  vqa/captioning needs 1 opt • grounding needs 1 opt • change_vqa needs 2 opt • optical_sar_fusion needs opt+sar • DETERMINISTIC area/spectral
+  validate_legality + registry_prompt_fragment → guardrails PlanSchema step cap 10
+
+ SHIMS → MODELS (no edits to inference scripts)
+  model1_shim → models/model1/run_inference.py (load_model ask_geochat) • model2_shim → models/model2/visualize_pipeline_graph.py + vendor config/train (GroundingDINO) • model3_shim → visualize_index_hybrid (indices+fusion) • model4_shim → infer.py + vendor engine/data (CROMA)
+
+ MEMORY — Hybrid RAG (no mock)
+  conversation.py load_history_hybrid (Chroma vector + SQLite recency) + save_history add_turn fire-and-forget • rag_store.py Chroma satiq_conversation 8001 + chroma_data volume • entity_registry extract_entities alias→bbox • memory.db SQLite turn_history
+
+ CACHE + RESILIENCE
+  query_cache TTLCache 3600/1024 • TTL tile/encoder • Redis satiq:exec:{id} setex 3600 + Last-Event-ID id: replay • checkpoint sorted-hash request_key • timeouts TOTAL 45s • circuit_breaker qwen_circuit • queue_gate semaphore 429 • dlq
+
+ STORAGE — MinIO + Disk fallback
+  MinIO 9000 rs-outputs • Disk orchestrator/storage/ingest/<stem>.tif + audit.db + outputs/ • ingest_file → EXIF GPS + validate_geotiff + thumbnail • geojson_export/report_generator/tiling 512+64 Window
+
+ SERVICES (deterministic, fail-closed)
+  image_pipeline.resolve_asset (sanitize asset_/file_ → rglob) • ffmpeg_preprocessor crop_bbox_to_png CPU • spectral NDVI/NDWI/NDBI/EVI (dummy→raise) • geocoder BUILTIN_GAZETTEER • transcription Groq whisper no mock • query_analyzer temporal/spatial • embedding bge
+
+ FLOW
+  [User Query + image] → input_validator (fail→error) → coreference (RAG) → router Ollama tools → planner Ollama tools + guardrails → {skip_models→composer | geospatial→task_agent→shims→post_processing→composer} → SSE answer_delta/final_answer + assets /api/assets/{name} → Frontend StreamMarkdown

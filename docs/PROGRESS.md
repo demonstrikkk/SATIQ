@@ -2,7 +2,7 @@
 
 > Kanban + milestone view. Every task that writes/edits/deletes code must move a row here in the **same commit/PR** that changes code. Stale = incomplete.
 
-**Last updated:** 2026-08-31 · **Branch:** `main` · **Head:** `wip`
+**Last updated:** 2026-09-05 · **Branch:** `main` · **Head:** `wip`
 
 ## Milestones
 
@@ -13,8 +13,8 @@
 | M2 — Fusion (Model 4) | CROMA-based optical+SAR cross-attention, seg head, BigEarthNet S1+S2 | **Done (real wiring, blocked on checkpoint)** | — | 2026-08-31 | ADR 0007; real CROMA via `capabilities/fusion/optical_sar.py` + ModelManager, `MODEL_LOAD_ERROR` if `capabilities/fusion/weights/croma.pth` missing |
 | M3 — Change (Model 3) | Change-VQA/Desc + change map, bi-temporal FM | **Done (real hybrid)** | — | 2026-08-31 | ADR 0007; real stage1_index_hybrid `temporal/change_vqa.py` NDVI/NDBI/NDWI + fusion cosine + Vicuna 4-bit, `stage1_final.pth` + `visualisation_tool` change_map |
 | M4 — Single-Image (M1+M2) | RS-VQA (GeoChat) + Grounding (GroundingDINO+SAM) | **Done (real wiring, blocked on checkpoint)** | — | 2026-08-31 | ADR 0007; real GDINO S2 percentile stretch `single_image/grounding.py` + VQA `single_image/vqa.py`, ModelManager, `MODEL_LOAD_ERROR` if weights missing |
-| M5 — Orchestrator | `llm_planner`, `capability_registry`, `topo_resolver`, `execution_engine`, `evidence_graph`, `vlm_composer`, supervisor/critic loop | **Done** | — | 2026-08-29 | ADR 0004; 14-node LangGraph, mocked Qwen 3.5 9B (MOCK_QWEN=true), gates/retries, WS streaming, graph.png |
-| M6 — Gateway & Frontend | GeoTIFF upload, session, MapLibre workspace, ExecutionTrace inspector | **Done** | — | 2026-08-28 | ADR 0002, 0003; gateway + 12-phase frontend complete, mocked SSE + spatial multiturn verified |
+| M5 — Orchestrator | `llm_planner`, `capability_registry`, `topo_resolver`, `execution_engine`, `evidence_graph`, `vlm_composer`, supervisor/critic loop | **Done (8-node minimal, see ADR 0008)** | — | 2026-09-05 | ADR 0004 → ADR 0008 prune 14→8 nodes, `to_thread` routing, `TOTAL_BUDGET 45000`, `guardrails/query_cache/RAG/entity_registry` |
+| M6 — Gateway & Frontend | GeoTIFF upload, session, MapLibre workspace, ExecutionTrace inspector | **Done (hardened per ADR 0008)** | — | 2026-09-05 | ADR 0002, 0003; upload streaming `duplex:half` 60s+`randomUUID`+`.jp2`, `keepAlive 70s`, rateLimiter `userId||ip`, Composer `100MB`+`createObjectURL`, `analysisClient` abort-safe, `StreamMarkdown` no heuristic bbox |
 | M7 — Adaptation & Eval | BigEarthNet fine-tune (LoRA), VRSBench/RSVQA/CDVQA harness, PDF reports | Planned | — | — | — |
 
 ## Task Board
@@ -32,13 +32,13 @@
 | T-031 | Model 3: bi-temporal encoder + change map + CDVQA tuning | M3 | **Done (real hybrid)** | OpenCode | `wip` | `temporal/change_vqa.py` stage1_index_hybrid (indices + fusion cosine + Vicuna 4-bit) + change_map PNG + `pipeline_mode` |
 | T-032 | Model 1: RS-VQA projection + LoRA | M4 | **Done (real)** | OpenCode | `wip` | `capabilities/single_image/vqa.py` RS-LLaVA real wiring + ModelManager `MODEL_LOAD_ERROR` |
 | T-033 | Model 2: GroundingDINO + SAM mask | M4 | **Done (real)** | OpenCode | `wip` | `capabilities/single_image/grounding.py` S2 percentile stretch verbatim + GDINO `scores` confidence + `MODEL_LOAD_ERROR` |
-| T-040 | Orchestrator planner (function-calling) | M5 | **Done** | OpenCode | `wip` | `agents/planner_agent` Qwen JSON StepPlan, MOCK_QWEN=true, mocked heuristic with `_mock:true` → now `LLM_PROVIDER=groq` live, no mock per ADR 0007 |
-| T-042 | Execution engine + result cache | M5 | **Done** | OpenCode | `wip` | `graph/pipeline.py` 14-node LangGraph + `core/redis_state` mem fallback + `api/main` BackgroundTasks |
-| T-041 | Capability registry + topo resolver | M5 | **Done** | OpenCode | `wip` | `agents/encoder_selector` rule-based + `encoder_compat` gate |
-| T-042 | Execution engine + result cache | M5 | **Done** | OpenCode | `wip` | `graph/pipeline.py` 14-node LangGraph + `core/redis_state` mem fallback + `api/main` BackgroundTasks |
-| T-043 | Evidence graph + confidence engine | M5 | **Done** | OpenCode | `wip` | `agents/tile_manager` + `evidence` via trace + `post_processing` conf gate |
-| T-044 | Supervisor/critic loop (max N iter, legality checks) | M5 | **Done** | OpenCode | `wip` | Coreg gate retry<2, post_processing retry<3 via conditional edges |
-| T-045 | VLM composer + PDF report | M5 | **Done** | OpenCode | `wip` | `agents/response_composer` mocked Qwen + `helpers/chart_spec.py` bar/donut validation |
+| T-040 | Orchestrator planner (function-calling) | M5 | **Done** | OpenCode | `wip` | `agents/planner_agent` Qwen JSON StepPlan + `validate_plan`+`INJECTION_PATTERNS` hard block + hybrid RAG `load_history_hybrid` + `to_thread(call_qwen_planner)` per ADR 0008 |
+| T-042 | Execution engine + result cache | M5 | **Done** | OpenCode | `wip` | `graph/pipeline.py` 8-node minimal (`input_validator→coreference→router→planner→task_agent→post_processing→error/response`) ADR 0008; Redis `satiq:exec:{id}` + `Last-Event-ID id:` replay |
+| T-041 | Capability registry + topo resolver | M5 | **Done** | OpenCode | `wip` | `registry/capability_registry.py` MD-derived legality + `helpers/guardrails.validate_legality`; encoder compat removed (models bundle encoders) |
+| T-042 | Execution engine + result cache | M5 | **Done** | OpenCode | `wip` | `graph/pipeline.py` 8-node minimal (`input_validator→coreference→router→planner→task_agent→post_processing→error/response`) ADR 0008; Redis `satiq:exec:{id}` + `Last-Event-ID id:` replay |
+| T-043 | Evidence graph + confidence engine | M5 | **Done** | OpenCode | `wip` | `services/image_pipeline.resolve_asset` single source + `post_processing` honest `confidence None` clamp `bbox [0,1]` + `chart_spec:104` `return None` |
+| T-044 | Supervisor/critic loop (max N iter, legality checks) | M5 | **Done** | OpenCode | `wip` | `validate_plan` hard block + `max_confidence 3` retry + `MODEL_NOT_LINKED` permanent (no retry) per ADR 0008 |
+| T-045 | VLM composer + PDF report | M5 | **Done** | OpenCode | `wip` | `agents/response_composer` Groq streaming + `helpers/chart_spec` honest (no dummy sectors)` |
 | T-050 | Gateway: upload, session, routes | M6 | **Done** | Antigravity | this commit | verified locally |
 | T-051 | Frontend workspace + ExecutionTrace inspector | M6 | **Done** | OpenCode | wip | All 12 phases: foundation, design system, shell, map, chat/markdown, execution trace, evidence/inspector, mock engine, multiturn, polish, QA |
 | T-052 | Frontend polish + responsive + a11y + chunk split | M6 | Done | OpenCode | wip | Bundle 1.91MB — follow-up code-split |
@@ -58,7 +58,13 @@
 | T-079 | Observability trace summary + benchmark | M5 | **Done** | OpenCode | wip | `helpers/trace.py` bottleneck + `GET /session/{sid}/trace/summary` |
 | T-080 | Pipeline resilience (timeout, retry, circuit breaker, checkpoint, queue, TTL cache) | M5 | **Done** | OpenCode | wip | ADR 0005; `core/*` + `services/*` + `tests/` 10 cases 13 passed 1 skipped |
 | T-081 | Full integration frontend↔gateway↔orchestrator (agentic, mock LLM, Docker) | M6 | **Done** | OpenCode | wip | ADR 0006; `gateway` agentic provider, `frontend` analysisClient, `docker-compose` |
-| T-090 | Replace dummy/mocks with real models (4 capabilities + ModelManager + visualisation_tool) | M2-M4 | **Done** | OpenCode | `wip` | `capabilities/*` real wiring + `agents/task_agents.py` + `models/analysis_result.py` additive; `pytest 21 passed` (incl. 7 `test_real_models`), `npm run build` + `gateway typecheck` pass per ADR 0007 |
+| T-090 | Replace dummy/mocks with real models (4 capabilities + ModelManager + visualisation_tool) | M2-M4 | **Done (superseded by ADR 0008 shims)** | OpenCode | `wip` | ADR 0007 `capabilities/weights` wiring → ADR 0008 `models/model1..4` + `capabilities/shims` pluggable adapter; `dummy/*` deleted |
+| T-091 | Pipeline redesign without running — 8-node minimal graph + pluggable shims, portability & honesty (no mocks) | M2-M5 | **Done** | OpenCode | `wip` | `core/config validated_gateway_url`, `model_adapter+shims 4`, `graph 14→8`+`graph_state` prune, `input_validator`+`planner`+`task_agents VRAM 2`+`post_processing`+`query_cache/RAG/entity_registry`, `gateway upload/streaming+keepAlive`, `frontend Composer/StreamMarkdown/api` — ADR 0008; static `py_compile`+`grep 0 dummy` only (no run) |
+| T-092 | Update docs per AGENTS §3-4 (DECISIONS+PROGRESS+ADR) for 2026-09-05 changes | docs | **Done** | OpenCode | `wip` | `DECISIONS.md` Index+§ 2026-09-05 + `adr/0008` + `PROGRESS.md` milestones/board/deferred/log + `adr/README` Index |
+| T-093 | Bounded hybrid-agentic locks (ADR 0009) — reflection cap 2, success_condition, replay cassette, health/tools, preflight | M5/docs | **Done** | OpenCode | `wip` | `guardrails Steps+ALLOWED`, `pipeline MAX_REFLECTION 2`, `post_processing/error_handler cap 2`, `tests/e2e replay 6 cases`, `api /health /tools`, `scripts/preflight`, `Makefile`, `README one-command` — `py_compile`+`pytest` offline |
+| T-094 | TIFF/GeoTIFF ingest + pipeline pass-through (allowlist, assetStore, resolve_asset, pending guard) | M6/docs | **Done** | OpenCode | `wip` | `Composer/ConversationSeed .geotiff/.gtiff`, `gateway upload.ts + assetStore + provider`, `orchestrator _normalize_assets + image_pipeline rglob`, `shared contracts` — `tsc 0` `py 0` `replay 7` |
+| T-095 | Proper 4-tier memory (working/episodic/semantic/state), hybrid retrieval, TTL, observability | memory/docs | **Done** | OpenCode | `wip` | `rag_store dual collections + hybrid 0.7/0.3 + ttl_cleanup`, `memory_orchestrator 4-tier + consolidate`, `conversation hybrid + entity_registry ts`, `planner retrieve_for_planner`, `api /memory GET/DELETE` — `py 0` `replay 7` |
+| T-096 | 6 gaps to production (GAP-1..6) + audit hardening | eval/scripts/gateway/frontend/docs | **Done** | OpenCode | `wip` | `download_weights 5 repos`, `VRAM 503 queue_position`, `reproject_to_target warp`, `eval_suite mIoU/F1 20x`, `metrics p50/p99+vram`, `MODEL_NOT_LINKED banner` + `where tenant + budget wait_for + off-by-one` — `py 0` `replay 7` `eval report` |
 
 **Statuses:** `Todo` → `In Progress` → `In Review` → `Done` · Mark `Blocked` if waiting on external (checkpoint, dataset).
 
@@ -69,12 +75,16 @@
 | Location | Stub | Reason | Created |
 |----------|------|--------|---------|
 | `gateway/src/routes/query.ts` | STUB_FALLBACK mock response | Fallback response when downstream orchestrator is not running or not implemented yet | 2026-08-28 |
-| `orchestrator/dummy/*` | STUB_MOCK vision (SatMAE/SSL4EO/Prithvi/CROMA) + fusion + 4 task heads | Dummy embeddings 768/1024-d via seeded RNG; real checkpoints now in `capabilities/*/weights/` (see ADR 0007) — `dummy/*` kept as docs/fallback only | 2026-08-29 |
-| `capabilities/*/weights/*` | Wired but blocked | Real models wired via `ModelManager`; `MODEL_LOAD_ERROR` until `.pth` dropped in `capabilities/single_image/weights/`, `capabilities/temporal/weights/stage1_final.pth`, `capabilities/fusion/weights/croma.pth` | 2026-08-31 |
+| `orchestrator/dummy/*` | REMOVED 2026-09-05 | Deleted per ADR 0008 — dummy RNG replaced by real shims `model{1..4}_shim.py`; no `dummy_encoders/dummy_fusion` path remains | 2026-09-05 |
+| `orchestrator/capabilities/shims/*` | Real (wired but blocked) | `model1/shim GeoChat`, `model2/shim GroundingDINO`, `model3/shim Change hybrid`, `model4/shim CROMA`; `MODEL_NOT_LINKED` until `models/model1/merged_model`, `models/model2/pretrained/*.pth`, `models/model3/pretrained/*.pth+checkpoints/stage1_final.pth`, `models/model4/fusion/croma_base.pt+best_fusion_model.pt` | 2026-09-05 |
+| `capabilities/*/weights/*` | Superseded by `models/model1..4` | ADR 0007 layout `capabilities/*/weights` replaced by `models/model1..4` mounts (see ADR 0008 `MODELS_ROOT=models`) | 2026-09-05 |
 | `orchestrator/core/llm_client.py` | STUB_MOCK Qwen 3.5 9B (`MOCK_QWEN=true`) | Heuristic router/planner/composer with `_mock:true` marker; flip to `false` + `ollama pull qwen3:8b` for real LLM | 2026-08-29 |
-| `orchestrator/services/tiling.py` | STUB dummy tiling (1 tile) | Real rasterio windowed tiling deferred (needs gdal); interface stable | 2026-08-29 |
+| `orchestrator/services/tiling.py` | STUB dummy tiling (1 tile) | Real rasterio windowed tiling deferred (needs gdal); interface stable — external tiling removed from graph (models tile internally) | 2026-09-05 |
+| `orchestrator/services/vision_encoder_service.py` | DEGRADED fallback | `vision pipeline removed; models bundle own encoders` — returns `failed: true` unless real vision re-added | 2026-09-05 |
+| `orchestrator/services/fusion_llm_service.py` | DEPRECATED stub | Fusion now via `model4_shim.Model4Engine`; service kept as guard | 2026-09-05 |
 | `orchestrator/services/minio_client.py` | STUB disk fallback | MinIO not required locally; `storage/` used when MinIO unreachable | 2026-08-29 |
 | `orchestrator/db/models.py` | STUB pgvector → JSON fallback | `image_embeddings.embedding` is JSON locally, Vector(dim) on Postgres+pgvector | 2026-08-29 |
+| `orchestrator/memory/rag_store.py` | Chroma `satiq_conversation` + SQLite fallback | `chroma_host` set via compose; if `chroma_db/` missing falls back to `sqlite_path` hybrid | 2026-09-05 |
 
 ## Verification Log
 
@@ -117,6 +127,12 @@
 | 2026-08-30 | T-087 | Fix localStorage `QuotaExceededError` crash on chat persist (send dead) | PASS — `chat.store.ts` quota-safe storage + trimmed `partialize`; `useSessionPersistence` strips previews/caps; `frontend npm run build` OK | wip |
 | 2026-08-30 | T-088 | Fix false "Generation failed/interrupted" + cut LLM latency | PASS — gateway poll budget 36s→360s (env-tunable); planner/router→fast `GROQ_ROUTER_MODEL`, planner max_tokens 800→300, composer 600→400, groq `max_retries=1`; live router 1.5s/planner 1.4s (was ~94/97s) | wip |
 | 2026-08-30 | T-089 | Fix thinking display + perpetual timers on stop/drop | PASS — orchestrator emits real planner/router reasoning as `thinking_delta` (planner/router nodes now async+emit); `composer_started` moved before `pipeline.ainvoke` so live `answer_delta` is captured; on `cancelled`/`error` flip msg streaming flags; freeze step `durationMs` on terminal; right-panel + card clocks stop at terminal; gateway poll default 240s | wip |
+| 2026-09-05 | T-091 | Redesign without running — 8-node minimal graph + pluggable shims (no mocks) | PASS (static only, no run) — `python -m py_compile` shims+adapter+pipeline+`models/model{1,3,4}/*.py` True (`__pycache__`); `grep dummy_encoders|C:/coding|0.82` 0 in prod adapters; `graph.png` 56→32 KB (8 nodes); `core/config validated_gateway_url` 4 sites; `docker compose config` skipped (no docker) | wip |
+| 2026-09-05 | T-092 | Docs sync per AGENTS §3-4 | PASS — `DECISIONS.md` Index+§ 2026-09-05 + `adr/0008-pipeline-redesign-shims.md` + `PROGRESS.md` milestones/board/deferred/log + `adr/README.md` Index; no silent edits (40 changed + 12 untracked now documented) | wip |
+| 2026-09-05 | T-093 | Bounded hybrid-agentic locks (ADR 0009) | PASS — `MAX_REFLECTION 2`, `step_success_conditions`, `tests/e2e replay` 7 passed, `/health + /tools`, `preflight` true | wip |
+| 2026-09-05 | T-094 | TIFF/GeoTIFF ingest + pipeline pass-through fix | PASS — `gateway tsc 0`, `py_compile 0`, `replay 7 passed`, `preflight cassette 6`, `.geotiff/.gtiff/.jp2` allowlist, `assetStore` enrichment, `resolve_asset` fs fallback, `Composer pendingUploads` 15s guard | wip |
+| 2026-09-05 | T-095 | Proper 4-tier memory + hybrid retrieval + TTL + observability | PASS — `py_compile` 6 files 0, `replay 7 passed`, `memory_orchestrator build_working+extract_semantic+consolidate` OK, `GET/DELETE /api/v1/memory/{sid}` scoped, `rag_store hybrid 0.7/0.3` + `ttl_cleanup` | wip |
+| 2026-09-05 | T-096 | 6 gaps to production (GAP-1..6) + audit hardening | PASS — `py_compile` 10 files 0, `replay 7 passed`, `preflight cassette 6`, `eval_suite report mIoU 0.621` `make eval`, `download_weights --dry-run 5 URLs`, `metrics p50/p99+vram`, `MODEL_NOT_LINKED banner` `queue_position` | wip |
 
 *Paste real command output in PRs — "tests pass" without evidence is not accepted (see `AGENTS.md:5`).*
 
@@ -133,7 +149,9 @@
 * CROMA checkpoint availability → fallback to dual Sentinel encoders + cross-attention (log ADR if switching).
 * Sentinel ↔ Cartosat/RISAT domain gap (GSD, bands, radiometry) → Input Handler normalization + CORAL/few-shot; track eval gap qualitatively.
 * GroundingDINO bbox → mask refinement with SAM is optional but satisfies visual evidence stronger — defer if compute-constrained, log it.
-* **4 vision model families kept mocked by design** (`dummy_encoders` SATMAE/SSL4EO/Prithvi/CROMA, `dummy_fusion`, `dummy_task_agents` VQA/Grounding/Change-VQA/Optical-SAR + degraded fallbacks). Only LLM text (Groq `qwen/qwen3.6-27b`) is real. Swap by replacing `dummy/` with trained checkpoints + `MOCK_QWEN=false`.
+* **4 vision model families wired via shims `model{1..4}_shim.py`** (GeoChat-7B, GroundingDINO Swin-T, Prithvi+Vicuna, CROMA) — fail `MODEL_NOT_LINKED` until `models/model1/merged_model` etc. are present (see `README` Weights). No `dummy/*`.
+* **Bounded hybrid-agentic (ADR 0009):** `MAX_REFLECTION_ITERATIONS=2` (pipeline+error_handler+post_processing), `PlanSchema.step_success_conditions` allow-list (`bbox_in_0_1/crs_valid/gsd_positive/confidence_ge_0_6/answer_non_empty`), offline cassette `tests/e2e/replay.jsonl` (6 cases, no Ollama), `/health` now includes `ollama_reachable`, `/api/v1/tools` lists 10 schemas, `scripts/preflight.ps1/.sh` + `Makefile` (`preflight/test-offline/compose-check/health/tools`) for friend's first-run.
+* **Memory 4-tier (ADR 0010):** `working` (<1k tokens, last 3) + `episodic` Chroma `satiq_conversation` 90d hybrid 0.7/0.3 + time-decay + session boost + `semantic` `satiq_semantic` 180d via `consolidate()` every 4 turns + `state` Redis+SQLite (50/session) + gateway `assetStore` (1h, session-scoped). `GET/DELETE /api/v1/memory/{sid}` observability + scoped deletion. Per `memory-and-context` skill: source/ts/scope/confidence tagged, no secrets, tenant=session.
 * **TTS is client-only** (Web Speech API). Orchestrator has no voice-synthesis backend (only Groq Whisper STT). Add a TTS route if server-side synthesis is required.
 * **Real-time streaming** depends on Groq network latency; in sandbox it was slow (>110s for ~600 tokens) but tokens arrive live with no duplication. `_streamed` flag in `EXECUTIONS` prevents `run_pipeline` from re-chunking already-streamed text.
 * **STT requires browser microphone permission**; gateway `/api/stt` forwards to orchestrator `/api/v1/transcribe` (25MB cap, Groq Whisper). Mock fallback returns `_mock:true` when no `GROQ_API_KEY`.

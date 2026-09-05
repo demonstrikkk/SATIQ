@@ -10,9 +10,9 @@ from orchestrator.core.structured_logging import log_node
 from orchestrator.core.metrics import record_node_latency
 from orchestrator.core.dlq import push as dlq_push
 
-# audit fix: keep 3 for confidence, 2 for infra errors — document explicitly
+# ADR 0009: reflection cap 2 protects 45s budget — both confidence and transient capped at 2
 MAX_TRANSIENT_RETRIES = 2
-MAX_CONFIDENCE_RETRIES = 3
+MAX_CONFIDENCE_RETRIES = 2
 
 async def error_handler_node(state: GraphState) -> GraphState:
     t0 = time.time()
@@ -28,9 +28,9 @@ async def error_handler_node(state: GraphState) -> GraphState:
     if not error_code:
         error_code = "unknown"
         state["error_code"] = error_code  # type: ignore
-    policy = state.get("retry_policy") or {"max_transient": 2, "max_confidence": 3, "max_coreg": 2}
-    max_transient = policy.get("max_transient", 2) if isinstance(policy, dict) else 2
-    max_conf = policy.get("max_confidence", 3) if isinstance(policy, dict) else 3
+    policy = state.get("retry_policy") or {"max_transient": 2, "max_confidence": 2, "max_coreg": 2}
+    max_transient = min(policy.get("max_transient", 2) if isinstance(policy, dict) else 2, 2)
+    max_conf = min(policy.get("max_confidence", 2) if isinstance(policy, dict) else 2, 2)
     retries = state.get("retry_count", 0)
     coreg_retries = state.get("coreg_retries", 0)
     backoff_ms = 0

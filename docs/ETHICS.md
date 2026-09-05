@@ -13,9 +13,10 @@
 ## 2. Geospatial Integrity (Safety-Critical)
 
 * **CRS is a hard gate.** `orchestrator/ingestion/validator.py` must reject CRS mismatch (e.g., EPSG:4326 vs EPSG:3857, or missing CRS) — never silently reproject without recording it in the trace. Wrong CRS = wrong location = safety failure.
-* **Resolution & band handling:** resampling/normalization must be deterministic, logged (GSD before/after, method), and reversible where possible. Do not silently drop bands.
+* **Resolution & band handling:** resampling/normalization must be deterministic, logged (GSD before/after, method), and reversible where possible. Do not silently drop bands. **2026-09-05 (ADR 0008):** external resampling/radiometric correction before the 4 vision models was removed — raw `image_path` is passed to `models/model{1..4}` shims which own their `load_and_convert_s2`/`CLIP/Swin/Prithvi/CROMA` preprocessing; orchestrator must not alter pixels before `call_model`.
 * **Co-registration:** cross-modal (optical+SAR) and bi-temporal pairs must pass a pairing check (same AOI, overlap threshold, acquisition date ordering). Flag, don’t hallucinate, if co-registration confidence is low.
 * **No mocked results.** Confidence, bboxes, change maps must come from model inference or deterministic calculators (`capabilities/geospatial/*`). Demo/mocked outputs must be labeled `STUB:` and never shown as real in the UI.
+* **Pixel-cap DoS guard (2026-09-05, ADR 0008).** `orchestrator/agents/input_validator.py` rejects `width*height > 100Mpix` (via `validate_geotiff` + asset dims) before the LLM — safety, not CRS, but logged alongside the CRS hard gate.
 
 ## 3. AI & Hallucination Controls
 
@@ -26,7 +27,7 @@
 
 ## 4. Privacy, Tenancy & Data Lifecycle
 
-* **Tenant isolation:** `gateway/session/` and `gateway/upload/` are per-session; no cross-session reads. Auth/tenancy changes require human approval — AI agents must pause and flag (see `AGENTS.md:6`).
+* **Tenant isolation:** `gateway/session/` and `gateway/upload/` are per-session; no cross-session reads. Auth/tenancy changes require human approval — AI agents must pause and flag (see `AGENTS.md:6`). **2026-09-05 (ADR 0008):** `gateway/src/middleware/rateLimiter.ts` keys by `userId || ip` (not ip alone) and `gateway/src/routes/upload.ts` + `agentic-analysis.provider` forward `Authorization` header to orchestrator — logged as tenancy-relevant boundary hardening.
 * **Secrets:** never commit `.env`, HF tokens, API keys. Use `.env.example`. Rotate if leaked — log ADR.
 * **Logging:** do not log raw GeoTIFF bytes, full prompts with PII, or precise user AOIs at high resolution unless explicitly required and redacted. Evidence logs = metadata + `execution_trace`.
 * **Retention:** define TTL for uploads/sessions (suggest 7–30 days, configurable). Provide deletion/export on request. Document in an ADR when introducing persistence.

@@ -1,111 +1,132 @@
 # Satiq — SatQuery AI
 
-> Multi-agent, chat-based system that answers natural-language questions about remote-sensing imagery. Agentic orchestration over 4 capability models — not dozens of narrow models — with auditable execution traces and visual evidence.
+> **Zero-synthetic, fail-closed, 8-node LangGraph** execution engine powered strictly by **Ollama `qwen3.5:9b`** and real **PyTorch vision shims**. No mocks, no dummy bbox/confidence, no Groq fallback.
 
-Single-image, cross-modal **Optical+SAR**, and bi-temporal analysis routed through a deterministic input gate → LLM orchestrator (function-calling) → capability tools → supervisor/critic loop → composer.
+Chat-based geospatial QA over single-image, cross-modal Optical+SAR, and bi-temporal analysis. Deterministic input gate → Ollama tool-calling (10 tools) → 4 real capability shims → post-processing confidence & evidence grounding → streaming composer with auditable trace.
+
+**Current state:** `Ollama qwen3.5:9b` only (`LLM_PROVIDER=local`), 8-node minimal graph (was 14), 4 pluggable shims under `models/model1..4` (do not edit inference scripts), single-GPU `VRAM_SEMAPHORE(2)` + `asyncio.to_thread`, 45s budget. See `docs/complete_system.mmd` / `orchestrator/graph/workflow_detailed.mmd` for live architecture.
+
+---
+
+## Quick Start — First Run (dev friend, no prior run)
+
+```powershell
+# 0) Preflight — proves wiring without docker/GPU/Ollama
+powershell -ExecutionPolicy Bypass -File scripts/preflight.ps1
+# or: make preflight  (same)
+pytest tests/e2e/test_replay.py -v   # offline cassette, 6 cases, no Ollama
+
+# 1. Ollama — qwen3.5:9b only (3–6s cold-start, then VRAM-resident)
+ollama serve
+ollama pull qwen3.5:9b
+ollama run qwen3.5:9b "hi"   # must print hi
+
+# 2. One command — full stack (compose)
+docker compose up --build -d
+# verify (diagnostic if 502/503)
+curl http://localhost:8000/health            # -> {status healthy, ollama_reachable true, ollama_model qwen3.5:9b}
+curl http://localhost:8000/api/v1/tools      # -> 10 tools (MODEL 4 + DETERMINISTIC 6)
+# or dev (no docker):
+# $env:PYTHONPATH="."; .\orchestrator\.venv\Scripts\python -m uvicorn orchestrator.api.main:app --host 0.0.0.0 --port 8000
+# npm --prefix gateway run dev  # :4000 keepAlive 70s duplex:half 60s
+# npm --prefix frontend run dev # :5173 (Composer 100MB createObjectURL, StreamMarkdown ?bbox=)
+```
+
+**Prereqs:** Python 3.11, Node 18+, Ollama, (optional) CUDA 12.1 for shims (`torch 2.2.2+cu121`), `ffmpeg` on PATH for CPU crop, `rasterio` for ingest. No Groq/Mistral keys needed. See `orchestrator/.env.example` (`QWEN_MODEL=qwen3.5:9b`, `QWEN_BASE_URL=http://localhost:11434/v1`).
+
+**Weights (fail-closed if absent → `MODEL_NOT_LINKED`):** `models/model1/merged_model` (GeoChat-7B 13.5GB), `models/model2/pretrained/*.pth + config` (GroundingDINO Swin-T), `models/model3/pretrained/*.pth + checkpoints/stage1_final.pth` (Prithvi+Vicuna), `models/model4/fusion/{croma_base.pt,best_fusion_model.pt}` + vendored `engine.py`/`data/preprocessing.py`. Add checkpoints — pipeline returns `MODEL_NOT_LINKED` (permanent) until present; no dummy.
+
+```powershell
+# One-command weights (huggingface_hub, HF_TOKEN for gated models)
+python scripts/download_weights.py --dry-run   # list URLs
+python scripts/download_weights.py --model all  # pull all 4 (needs ~25GB)
+python scripts/download_weights.py --check     # verify MODEL_NOT_LINKED clears
+# or: make weights  |  make weights-check
+```
 
 ---
 
 ## 1. Input Configurations
 
-| # | Configuration | Upload | Example Query |
-|---|---------------|--------|---------------|
-| 1 | **Single Image** | 1× GeoTIFF (optical / multispectral / SAR) | "What land cover is present? Count built-up clusters." |
-| 2 | **Cross-Modal Pair** | Co-registered Optical + SAR (same AOI) | "Identify crop and water regions using optical+SAR" |
-| 3 | **Bi-Temporal Pair** | Co-registered t1 + t2 (same AOI, different dates) | "Has built-up area increased? What changed and where?" |
+| # | Configuration | Modality / Assets | Example Query | Task |
+|---|---------------|-------------------|---------------|------|
+| 1 | **Single Image** | 1× optical/multispectral/SAR (`crs`+`gsd` required) | "What land cover is present? Count built-up clusters." | `vqa` |
+| 2 | **Cross-Modal Pair** | Optical + SAR co-registered same AOI | "Identify crop and water using optical+SAR" | `optical_sar_fusion` |
+| 3 | **Bi-Temporal Pair** | t1 + t2 same AOI, different dates | "Has built-up increased? What changed and where?" | `change_vqa` |
+| — | **Grounding** | 1× optical + referring expression | "Where is the water body in the north?" | `grounding` → bbox + `?bbox=` URL → MapLibre |
+| — | **Definitional** | 0 images, geospatial knowledge | "What is NDVI?" | `chitchat` (skip_models) |
 
-> GeoTIFF/TIFF required for production; PNG/JPEG accepted only for benchmarks (VRSBench/RSVQA/CDVQA). SAR = Sentinel-1 style backscatter; Optical = Sentinel-2 / Cartosat-2S.
+> GeoTIFF/TIFF required for production; PNG/JPEG only for benchmarks.
 
 ---
 
-## 2. Architecture
+## 2. Architecture — 8-Node Minimal
 
 ```mermaid
 flowchart TB
-    U[User Upload + NL Query] --> IH[1. INPUT HANDLER\nDeterministic, non-LLM]
-    IH -->|valid| OC[2. ORCHESTRATOR\nLLM function-calling]
-    IH -->|reject| ERR[Reject/Flag before LLM]
-    OC --> T1[Tool 1: RS-VQA]
-    OC --> T2[Tool 2: Grounding]
-    OC --> T3[Tool 3: Change-VQA/Desc]
-    OC --> T4[Tool 4: Optical-SAR Fusion]
-    OC --> TG[Deterministic Geospatial Tools\narea, NDVI, spectral indices]
-    T1 & T2 & T3 & T4 & TG --> SUP[4. SUPERVISOR / CRITIC\nLLM loop, max N iter]
-    SUP -->|PASS or max iter| COMP[Response Composer\n+ Execution Trace + Visual Overlay]
-    SUP -->|RETRY| OC
-    COMP --> OUT[(Answer + bbox/mask/change map + confidence\n+ execution_trace JSON + PDF)]
+    U[User query + images] --> FE[Frontend 5173<br/>Composer 100MB createObjectURL<br/>StreamMarkdown ?bbox=]
+    FE --> GW[Gateway 4000<br/>upload duplex:half 60s + query agentic dedup 32]
+    GW --> ING[POST /api/v1/ingest<br/>EXIF GPS + validate_geotiff]
+    GW --> TASK[POST /api/v1/task<br/>_normalize_assets • CRS 400 • 100Mpix 413 • queue 429<br/>Redis satiq:exec:{id} 3600 + Last-Event-ID]
+    TASK --> IV[input_validator<br/>request_key sorted-hash • deadline 45s<br/>len 16-4000 • jailbreak guardrails<br/>CRS hard gate • GSD>0 • 100Mpix]
+    IV -->|fail| EH[error_handler]
+    IV -->|pass| CR[coreference_resolver<br/>entity_registry • history]
+    CR --> R[router<br/>Ollama ROUTER_TOOLS 4<br/>tool_choice auto via to_thread]
+    R --> P[planner<br/>Ollama REGISTERED_TOOLS 10 + RAG<br/>PlanSchema • guardrails step cap 10]
+    P -->|skip greeting/chitchat/help| RC[response_composer<br/>Ollama stream 2048]
+    P -->|geospatial| TA[task_agent<br/>VRAM 2 • to_thread → shim]
+    TA --> S1[model1 GeoChat-7B<br/>ask_geochat]
+    TA --> S2[model2 GroundingDINO<br/>2-98% percentile → bbox]
+    TA --> S3[model3 Prithvi+Vicuna<br/>indices + fusion]
+    TA --> S4[model4 CROMA 12+2<br/>Model4Engine]
+    TA --> PP[post_processing<br/>conf 0.6 • bbox [0,1] • chart real only]
+    PP --> RC
+    PP -->|retry ×3| TA
+    RC --> SSE[SSE answer_delta → Gateway → Frontend<br/>+ /api/assets bbox overlay]
+    EH --> END
+    RC --> END
 ```
 
-### 2.1 Input Handler — Deterministic Gatekeeper (no LLM cost on invalid input)
+Live, code-accurate diagrams: `orchestrator/graph/complete_system.mmd` (layered) + `orchestrator/graph/workflow_detailed.mmd` (wired workflow) + PNGs `complete_system.png 2400×3300` / `workflow_detailed.png 2400×~2450` via `python orchestrator/graph/workflow_detailed.py` (Pillow). Premium HTML: `docs/workflow_premium.html`.
 
-* File format validation — GeoTIFF/TIFF; PNG/JPEG only for benchmarks
-* Modality detection — band count + metadata → optical / multispectral / SAR / pair
-* Metadata extraction — CRS, pixel resolution/GSD, band list, acquisition timestamp
-* Co-registration / pairing check — for cross-modal & bi-temporal (same AOI, CRS alignment, resolution resampling)
-* Rejects/flags incompatible input **before** it reaches the LLM
-* Radiometric + resolution normalization (common GSD, reflectance/backscatter scaling) to mitigate Sentinel ↔ Cartosat-2S / RISAT domain gap
+### 2.1 Input Handler — Deterministic Gate (no LLM cost)
+File `agents/input_validator.py:23` + `helpers/guardrails.py`, `services/image_ingest.py`
+- Length 16–4000, empty/greeting/out_of_scope via LLM (no `4x+3y` literals), jailbreak `check_prompt_injection`
+- CRS hard gate `_crs_mismatch` (permanent), `GSD>0`, `w*h>100Mpix` guard, `_corrupt/malformed_geotiff`
+- `request_key` sorted-hash + `deadline_ms = now+45s`, `node_latencies`, `retry_policy`, `circuit_breaker_state`
+- `POST /api/v1/ingest` ingest: `rasterio→PIL` validate, EXIF GPS, thumbnail, `orchestrator/storage/ingest/<stem>.tif` (no resampling before model)
 
-### 2.2 Orchestrator — LLM with Function-Calling / Tool-Use
+### 2.2 Ollama Tool-Calling — Router & Planner
+Files `core/llm_client.py:500` + `helpers/tool_schemas.py:13` + `agents/router_agent.py:11` + `agents/planner_agent.py:9`
+- **Ollama `qwen3.5:9b` only** — `LLM_PROVIDER=local`, `resolve_provider` raises if not `has_local_qwen_capability()` (no Groq/Mistral/mock)
+- `ROUTER_TOOLS 4` + `REGISTERED_TOOLS 10` (`run_vqa/grounding/change_vqa/fusion` + `compute_spectral_indices/calculate_area/geocode_region/crop_bbox/generate_visual_evidence/retrieve_history`) via `ollama.chat tools=... tool_choice auto`, `TOOL_NAME_TO_TASK` mapping, else single-word `vqa|grounding|change_vqa|optical_sar_fusion|greeting|chitchat|help|out_of_scope`
+- `registry/capability_registry.py` `validate_legality` + `guardrails.validate_plan` hard block `capability_illegal/step cap 10` (PlanSchema)
 
-Single LLM call (instruction-tuned, can be small open model — routing, not perception). Responsibilities:
+### 2.3 Single-GPU Execution + Off-GPU Crop
+File `agents/task_agents.py:34` + `capabilities/model_adapter.py:20` + `services/image_pipeline.py` + `services/ffmpeg_preprocessor.py:14`
+- `VRAM_SEMAPHORE(2)` + `asyncio.to_thread(call_model, ...)` — models bundle own encoders (CLIP/Swin/Prithvi/CROMA), no external tiles
+- `resolve_asset` sanitizes `asset_/file_` → `rglob` `gateway/upload`↔`storage/ingest`, **no resampling** before shim
+- `FFmpeg crop_bbox_to_png` CPU `-vf crop=w:h:x:y,scale=512` (grounding only, `last_crop_path`), `tiling 512+64 Window` via `rasterio` or passthrough, `spectral NDVI/NDWI/NDBI/EVI` pure numpy (dummy→raise), `geocoder BUILTIN_GAZETTEER`
+- **Abort propagation:** `if EXECUTIONS[session_id].get("is_cancelled"): return` before `VRAM_SEMAPHORE` (saves GPU slot)
+- **CUDA flush:** `finally: torch.cuda.empty_cache(); gc.collect()` after each shim
 
-* Query normalization & task-type classification
-* Cross-check task vs. input configuration (e.g., reject `change detection` if only 1 image supplied)
-* Select tools + emit auditable JSON: `{"tool": "...", "params": {"question": "..."}}`
-* May chain sequentially (e.g., `Fusion → VQA`)
-* Emits structured `execution_trace`: task type, tools called, parameters, iteration count
-
-> Prompt-injection hardening on params; output is auditable, not free-text tool names.
-
-### 2.3 Capability Tools (4 Models)
-
-| Tool | Model | Purpose |
-|------|-------|---------|
-| **Tool 1** | **RS-VQA** | Free-form / close-ended QA on single image (land cover, presence/counts, spatial relations) |
-| **Tool 2** | **Grounding** | Text-guided localization → bbox `(x,y,w,h)` or mask + confidence (visual evidence) |
-| **Tool 3** | **Change-VQA / Change Description** | Bi-temporal: answers "what changed?" + optional binary/multi-class change mask |
-| **Tool 4** | **Optical-SAR Fusion** | Cross-attention joint extraction from co-registered optical+SAR → text summary + spatial map |
-
-Deterministic geospatial helpers (no ML): `area_calculator.py`, `ndvi.py`, `spectral_indices.py`.
-
-### 2.4 Supervisor / Critic — Loop Controller
-
-```python
-iteration = 0
-while iteration < MAX_ITER:
-    iteration += 1
-    result = execute(orchestrator_plan)
-    verdict = critic(result)  # checks: answer relevance, tool-call legality, visual_evidence
-    if verdict == PASS or iteration == MAX_ITER:
-        finalize(result, iteration)
-        break
-    else:
-        revise_and_retry()
-```
-
-Checks: answer relevance (does text address the question?), tool-call legality (incompatible tool for input type?), visual evidence (overlay present: bbox / segmentation / change heatmap), confidence calibration.
-
-### 2.5 Response Composer (VLM — single LLM call)
-
-Fuses tool outputs → final answer + visual overlay + confidence + `execution_trace`. Also drives PDF report generation (WeasyPrint) from structured JSON.
+### 2.4 Response Composer — Streaming
+File `agents/response_composer.py` + `core/llm_client.py` `call_qwen_composer_stream` (Ollama `stream True`, 2048 tok), `helpers/chart_spec.py`.
+- Emits `thinking_delta/answer_delta`, `chart` ```chart, `bbox` table + normalized `?bbox=x1,y1,x2,y2` on `/api/assets/{name}` (768px, not base64) → `StreamMarkdown` MapLibre overlay (no keyword heuristic)
+- `save_history` fire-and-forget → `rag_store Chroma 8001/chroma_data` + `SQLite memory.db` + `audit.db execution_traces` + `MinIO rs-outputs`
 
 ---
 
-## 3. The 4 Models — Specs & Adaptation
+## 3. The 4 Shims — Real Weights, Fail-Closed
 
-Adaptation is **remote-sensing adaptation**: fine-tune vision encoder + cross-modal projection on RS data; language decoder via LoRA/QLoRA; heads only where needed. Two-stage pattern for every text-generation model:
+| Shim | Model | Input → Output | Shim file |
+|------|-------|----------------|-----------|
+| **model1 VQA** | GeoChat-7B merged 13.5GB (4bit 7GB) | `image_path + query` → `ask_geochat` → `{text, confidence:None}` | `capabilities/shims/model1_shim.py` → `models/model1/run_inference.py` |
+| **model2 Grounding** | GroundingDINO Swin-T ~170M | `image_path + query` → `load_and_convert_s2 2-98%` → `build_groundingdino` → `bbox_xyxy` pixel + `bbox_normalized [0,1]` + `scores` | `shims/model2_shim.py` → `models/model2/visualize_pipeline_graph.py` + vendor `config.py/train.py` (do not edit inference) |
+| **model3 Change** | Prithvi-100M + Vicuna-7B hybrid | `t1 + t2 + query` → `compute_indices` NDVI/NDBI/NDWI (fail-closed B04/B08) → `classify_deltas 0.05` → `fusion_change_confidence` → Vicuna text-only | `shims/model3_shim.py` → `models/model3/visualize_index_hybrid.py` |
+| **model4 Fusion** | CROMA dual ViT 12+2 120×120 cross-attention | `optical + sar + query` → `Model4Engine.predict` → `per_modality + spatial_cam` | `shims/model4_shim.py` → `models/model4/infer.py` + vendor `engine.py/data/preprocessing.py` |
 
-* **Stage 1 — Representation warm-start:** freeze vision encoder, train projection/fusion layer on image–text pairs (BigEarthNet labels/captions)
-* **Stage 2 — Instruction tuning:** LoRA on LLM decoder (+ last vision blocks), train on task QA pairs (VRSBench / RSVQA / CDVQA)
-
-| Model | Input | Output | Backbone Recommendation | Training Data |
-|-------|-------|--------|-------------------------|---------------|
-| **1 — RS-VQA** | 1 image + question string | Text answer + confidence | RS-pretrained VLM (e.g., RS-LLaVA / GeoChat-style) or CLIP-RS + Phi-2/3-mini; freeze encoder → train MLP projection, then LoRA on decoder | Stage1: BigEarthNet S1+S2 image–text pairs · Stage2: VRSBench + RSVQA QA |
-| **2 — Grounding** | 1 image + referring expression | bbox/mask + confidence | GroundingDINO (Swin backbone) + optional SAM for mask refinement; fine-tune cross-attention/fusion, box + objectness head | BigEarthNet-derived region annotations + VRSBench grounding |
-| **3 — Change-VQA/Desc** | 2 co-registered images (t1,t2) + question | Text change description + optional change map | Bi-temporal encoder (IBM-NASA geospatial FM or similar) → difference/attention fusion → shared decoder | Stage1: BigEarthNet bi-temporal tiles (self-supervised change) · Stage2: CDVQA QA + optional segmentation head |
-| **4 — Optical-SAR Fusion** | Co-registered optical + SAR + query | Joint text summary + spatial map/mask + per-class confidence | CROMA (Contrastive Radar-Optical MAE) — pretrained on Sentinel-1+2 pairs; fallback: separate S1/S2 encoders + cross-attention fusion | Stage1: BigEarthNet S1+S2 multi-label land-cover (fusion + seg head) · Stage2: LoRA text decoder on synthetic/VRSBench descriptions |
-
-> **Domain gap note:** Sentinel-1/2 (pretraining) vs. Cartosat-2S + RISAT (deployment) differ in GSD, band count, radiometry. Mitigations: (1) Input Handler resampling/normalization, (2) CORAL / few-shot feature adaptation, (3) qualitative sanity-check on target sensors. BigEarthNet S1+S2 is primary — prioritize Model 4 early.
+`capabilities/model_adapter.py:20` `MODEL_MAP` shim-pref (`probe inference/ask_geochat`, wrap `str→dict`), `is_model_linked` checks shim+original, missing → `MODEL_NOT_LINKED` permanent, inference exception → `MODEL_INFERENCE_ERROR` transient (retry 1). `config.py` `models_root=models` relative, `validated_gateway_url()` at 4 sites, no `C:/coding/sih`.
 
 ---
 
@@ -114,65 +135,32 @@ Adaptation is **remote-sensing adaptation**: fine-tune vision encoder + cross-mo
 ```
 satiq/
 ├── frontend/                    # React + TS + MapLibre
-│   ├── src/
-│   │   ├── workspace/           # map + chat + evidence inspector
-│   │   ├── components/
-│   │   │   ├── ExecutionTrace/  # key UI differentiator — auditable trace
-│   │   │   ├── EvidencePanel/
-│   │   │   └── ModalityView/    # optical vs SAR split view
-│   │   └── hooks/
-├── gateway/                     # Node/Express + TypeScript
-│   ├── routes/
-│   ├── upload/                  # GeoTIFF handling
-│   └── session/
-├── orchestrator/                # Python — core system
-│   ├── models/
-│   │   ├── raster_asset.py      # Pydantic — build first
-│   │   └── analysis_result.py   # Pydantic — build first
-│   ├── ingestion/
-│   │   └── validator.py         # CRS hard gate — build second
-│   ├── understanding/
-│   │   └── query_normalizer.py
-│   ├── planner/
-│   │   └── llm_planner.py       # single LLM call
-│   ├── registry/
-│   │   ├── capability_registry.py
-│   │   └── topo_resolver.py     # auto-prerequisite resolution
-│   ├── engine/
-│   │   ├── execution_engine.py
-│   │   └── result_cache.py
-│   ├── evidence/
-│   │   ├── evidence_graph.py
-│   │   └── confidence_engine.py
-│   └── composer/
-│       └── vlm_composer.py      # single LLM call
-├── capabilities/                # isolated per capability
-│   ├── single_image/
-│   │   ├── vqa.py               # GeoChat wrapper
-│   │   ├── caption.py
-│   │   └── grounding.py         # GroundingDINO wrapper
-│   ├── temporal/
-│   │   ├── change_vqa.py        # ChangeChat wrapper
-│   │   ├── change_map.py        # Siamese UNet
-│   │   └── alignment.py         # raster co-registration
-│   ├── fusion/
-│   │   └── optical_sar.py       # cross-attention fusion
-│   └── geospatial/
-│       ├── area_calculator.py   # deterministic, no ML
-│       ├── ndvi.py
-│       └── spectral_indices.py
-├── adaptation/                  # BigEarthNet fine-tuning
-│   ├── train.py
-│   ├── eval.py
-│   └── configs/
-├── evaluation/                  # benchmark harness
-│   ├── evaluate.py
-│   ├── suites/
-│   │   ├── vrsbench.py
-│   │   ├── rsvqa.py
-│   │   └── cdvqa.py
-│   └── reports/
-└── docker-compose.yml
+│   ├── src/components/chat/     # Composer 100MB createObjectURL, StreamMarkdown ?bbox=, ChartBlock ApexCharts
+│   ├── src/lib/analysisClient.ts # abort-safe SSE, Finally only if !failed
+│   └── public/complete_system.png
+├── gateway/                     # Node/Express + TS :4000
+│   ├── src/routes/upload.ts     # createReadStream duplex:half 60s + _authHeader
+│   ├── src/analysis/providers/agentic-analysis.provider.ts # dedup 32 + keepAlive 70s
+│   └── upload/                  # ephemeral — TTL cleanup 1h
+├── orchestrator/                # Python :8000 FastAPI + LangGraph 8-node
+│   ├── graph/pipeline.py        # 8 nodes, after_planner skip_models → composer
+│   ├── agents/                  # input_validator, coreference, router, planner, task_agents, post_processing, response_composer, error_handler
+│   ├── capabilities/shims/      # model1..4 thin wrappers (do not edit models/model*/inference)
+│   ├── models/model2/config.py  # vendored IMAGE_SIZE 224, RGB_BANDS, PRETRAINED_DIR
+│   ├── models/model4/engine.py  # vendored Model4Engine singleton + preprocessing
+│   ├── helpers/tool_schemas.py  # REGISTERED_TOOLS 10 + ROUTER_TOOLS 4
+│   ├── helpers/guardrails.py    # PlanSchema + validate_plan
+│   ├── services/                # image_pipeline, ffmpeg_preprocessor, spectral, geocoder, tiling 512+64, transcription (no mock)
+│   ├── memory/rag_store.py      # Chroma satiq_conversation 8001
+│   ├── core/llm_client.py       # Ollama qwen3.5:9b only, no Groq
+│   └── graph/complete_system.*  # layered + workflow_detailed 2400×~2450 PNG (Pillow)
+├── models/model1..4/            # mounted read-only, inference scripts do not edit
+│   ├── model1/run_inference.py  # GeoChat
+│   ├── model2/visualize* + vendor config/train
+│   ├── model3/visualize_index_hybrid.py
+│   └── model4/infer.py + vendor engine/data
+├── docker-compose.yml           # + chroma:8001 & models:ro & CHROMA_HOST
+└── docs/                        # DECISIONS.md + PROGRESS.md + workflow_premium.html
 ```
 
 ---
@@ -181,13 +169,13 @@ satiq/
 
 | Requirement | Satisfied By |
 |-------------|--------------|
-| **Remote-sensing adaptation** | Fine-tuned RS-VLM / CROMA / geospatial FM on BigEarthNet S1+S2 (not generic COCO) |
-| **Captioning OR Grounding** | Model 2 Grounding (bbox/mask) — doubles as visual evidence; captioning as auxiliary |
-| **Multi-image change analysis** | Model 3 Change-VQA + change map (bi-temporal) |
-| **Optical-SAR fusion** | Model 4 cross-attention fusion (complementary info) |
-| **Agentic orchestration** | Orchestrator (function-calling) + Supervisor/Critic loop |
-| **Input compatibility checking** | Input Handler deterministic gatekeeper + orchestrator cross-check |
-| **Auditable execution summary** | `execution_trace` (task, tools, params, iterations) + visual overlay + confidence |
+| **RS adaptation** | Real weights via shims (BigEarthNet S1+S2), not COCO; `ModelManager` singleton, thread-safe |
+| **Grounding** | Model2 bbox `[0,1]` pixel + `?bbox=` URL → MapLibre (no dummy) |
+| **Change** | Model3 `t1+t2` + `?bbox` region_of_interest via geocoder, sub_queries merger |
+| **Optical-SAR fusion** | Model4 12+2 `Model4Engine`, `per_modality` + `spatial_cam` |
+| **Agentic orchestration** | 8-node LangGraph, function-calling (`tool_choice auto`), `PlanSchema` guardrails, `max_transient 2` |
+| **Input compatibility** | CRS hard gate + GSD + 100Mpix + jailbreak + pairing temporal/contrast via `query_analyzer` |
+| **Auditable trace** | `execution_trace` + `thinking_delta` + `events` SSE + `audit.db` + `chart` + `artifacts` |
 
 ---
 
@@ -195,71 +183,50 @@ satiq/
 
 | Layer | Choice |
 |-------|--------|
-| **Frontend** | React + TypeScript + MapLibre GL, ExecutionTrace / EvidencePanel / ModalityView |
-| **Gateway** | Node / Express + TypeScript, GeoTIFF upload, session management |
-| **Orchestrator** | Python, Pydantic models, LLM function-calling (small instruction model or hosted API), deterministic validator |
-| **Capabilities** | GeoChat, GroundingDINO (+ SAM optional), ChangeChat / Siamese UNet, CROMA, geospatial deterministics |
-| **Adaptation** | BigEarthNet S1+S2, VRSBench / RSVQA / CDVQA, LoRA/QLoRA, cross-attention fusion |
-| **Reports** | Server-side PDF (WeasyPrint) from `execution_trace` + results JSON |
-| **Infra** | `docker-compose.yml` (frontend / gateway / orchestrator) |
+| **Frontend** | React + TypeScript + Vite, MapLibre GL, ApexCharts, Zustand `satiq-chat-v1` (quota-safe `partialize` strips preview) |
+| **Gateway** | Node/Express + TS, `keepAlive 70s`, `randomUUID` + `.jp2` |
+| **Orchestrator** | Python 3.11 FastAPI + LangGraph, Ollama `qwen3.5:9b` via `ollama` + OpenAI-compat `http://localhost:11434/v1`, Pydantic |
+| **Vision** | GeoChat-7B, GroundingDINO Swin-T, Prithvi+Vicuna, CROMA — vendored shims |
+| **Memory/RAG** | Chroma 0.5.20 + `llama-index 0.11.20` + SQLite `memory.db`, `TTLCache 3600/1024` |
+| **Storage** | MinIO 9000 `rs-outputs` + disk fallback `orchestrator/storage/ingest`, `reportlab` PDF |
+| **Infra** | `docker-compose` + `chroma` service, `models:ro` mount, `lifespan` warmup |
 
 ---
 
-## 7. Build Priority (Hackathon Order)
+## 7. Build Priority (Done → Next)
 
-1. **Pydantic models** `raster_asset.py` + `analysis_result.py` → then **CRS hard gate** `validator.py`
-2. **Model 4 Fusion** — most tied to primary dataset (BigEarthNet S1+S2)
-3. **Model 3 Change-VQA** — second mandatory multi-image capability
-4. **Model 1 RS-VQA + Model 2 Grounding** (leverage existing RS-VLM / GroundingDINO checkpoints)
-5. **Orchestrator + Supervisor loop** (function-calling, legality checks, retry)
-6. **Response Composer polish** — overlays, confidence, execution trace, PDF report
-7. **Frontend workspace** — map + chat + trace inspector (the differentiator)
+1. **✅ Pydantic `raster_asset` + `analysis_result` + CRS hard gate**
+2. **✅ Model4 CROMA + Model3 Change hybrid (index + fusion)**
+3. **✅ Model1 VQA + Model2 Grounding (vendors)**
+4. **✅ Orchestrator 8-node + Ollama tool-calling + guardrails**
+5. **✅ Composer streaming + charts + bbox URL + RAG**
+6. **✅ Frontend/Gateway hardening (upload stream, abort, keepAlive)**
+7. **Next:** `evaluation/evaluate.py --suite vrsbench` (VRSBench/RSVQA/CDVQA) after dropping checkpoints; `adaptation/train.py` LoRA.
 
 ---
 
-## 8. Getting Started
+## 8. Lifespan & Resilience (implemented)
 
-```bash
-# scaffold only — services stubbed, uncomment in docker-compose.yml as implemented
-docker compose up --build
-
-# when repos are connected
-git remote add origin https://github.com/<you>/satiq.git
-git push -u origin main
-```
-
-
-# TO RUN COMPLETE APPLICATION
-```bash
-Start-Process powershell -ArgumentList '-NoExit', '-Command', 'cd C:\Users\asus\Downloads\Satiq; $env:PYTHONPATH="."; .\orchestrator\.venv\Scripts\python.exe -m uvicorn orchestrator.api.main:app --host 0.0.0.0 --port 8000'; Start-Process powershell -ArgumentList '-NoExit', '-Command', 'npm --prefix C:\Users\asus\Downloads\Satiq\gateway run dev'; Start-Process powershell -ArgumentList '-NoExit', '-Command', 'npm --prefix C:\Users\asus\Downloads\Satiq\frontend run dev'
-
-
-
-
-```
-or
-```bash
-npm --prefix .\Satiq\gateway run dev
-npm --prefix .\Satiq\frontend run dev
-cd .\Satiq; $env:PYTHONPATH="."; .\orchestrator\.venv\Scripts\python.exe -m uvicorn orchestrator.api.main:app --host 0.0.0.0 --port 8000
-```
-
-
-> Current state: scaffold complete (`aa6fef2`), no model/LLM code yet. Follow build priority above.
+- **Lifespan warmup** (`api/main.py:567`): `ollama.chat(model=qwen3.5:9b, 1-token)` on startup + `has_local_qwen_capability` check — cold-start 3–6s absorbed before first query, stays in 45s budget.
+- **Abort propagation** (`agents/task_agents.py:34`): `if EXECUTIONS[session_id].get("is_cancelled"): return` before `VRAM_SEMAPHORE` — cancels orphaned `to_thread` slot.
+- **Disk cleanup** (`services/image_ingest.py:246` + `gateway/upload`): `mtime>3600` sweep of `orchestrator/storage/ingest/*` + `gateway/upload/*` + FFmpeg `/tmp/crop_*.png`.
+- **CUDA flush** (`agents/task_agents.py:22`): `finally: torch.cuda.empty_cache(); gc.collect()` after each shim.
+- **Bbox URL** (`agents/task_agents.py:70` + `api/main.py:233`): `?bbox=x1,y1,x2,y2&crs=EPSG:4326` on `/api/assets` → `StreamMarkdown` `bbox://` without keyword heuristic (was `water→0.18` removed).
+- **Redis TTL** (`api/main.py:105`): `satiq:exec:{id} setex 3600` + `Last-Event-ID id:` replay.
 
 ---
 
 ## 9. Evaluation
 
 ```bash
-python evaluation/evaluate.py --suite vrsbench
+python evaluation/evaluate.py --suite vrsbench   # VQA + grounding + captioning
 python evaluation/evaluate.py --suite rsvqa
 python evaluation/evaluate.py --suite cdvqa
 # reports → evaluation/reports/
 ```
 
-Benchmarks: VRSBench (VQA + grounding + captioning), RSVQA, CDVQA. BigEarthNet for RS adaptation warm-start.
+Requires linked weights; otherwise `MODEL_NOT_LINKED` permanent (auditable, not dummy).
 
 ---
 
-**License:** TBD · **Status:** Scaffold — architecture locked, implementation next.
+**License:** TBD · **Status:** Ollama-only demo ready — `workflow_premium.html` for premium architecture view.

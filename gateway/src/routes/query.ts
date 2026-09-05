@@ -26,6 +26,7 @@ router.post('/', (req: AuthenticatedRequest, res: Response) => {
     asset_ids: Array.isArray(asset_ids) ? asset_ids.filter((a) => typeof a === 'string') : undefined,
     spatial_refs:
       Array.isArray(spatial_refs) ? spatial_refs.filter((s) => typeof s === 'string') : undefined,
+    _authHeader: typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
   };
 
   const execution = executionManager.create(request, userId);

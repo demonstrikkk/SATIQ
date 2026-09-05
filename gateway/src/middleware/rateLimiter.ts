@@ -1,13 +1,17 @@
 import rateLimit from 'express-rate-limit';
 
-// General rate limiter for all API endpoints
+const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 15 * 60 * 1000);
+const maxRequests = Number(process.env.RATE_LIMIT_MAX ?? 100);
+
+// General rate limiter — trust proxy handled in index.ts
 export const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per `window`
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  windowMs,
+  max: maxRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as any).user?.userId || req.ip || 'unknown',
   message: {
-    error: 'Too many requests from this IP, please try again after 15 minutes'
+    error: 'Too many requests, please try again after 15 minutes'
   }
 });
 

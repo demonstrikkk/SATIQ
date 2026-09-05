@@ -43,6 +43,8 @@ export interface AnalysisRequest {
   session_id?: string;
   asset_ids?: string[];
   spatial_refs?: string[];
+  /** Forwarded Authorization header for orchestrator (gateway injects req.headers.authorization) */
+  _authHeader?: string;
 }
 
 export interface AnalysisExecution {
@@ -79,6 +81,16 @@ export interface AssetMeta {
   size: number;
   url: string;
   uploaded_at: string;
+  // Enriched by orchestrator ingest — optional, forwarded to pipeline
+  width?: number;
+  height?: number;
+  crs?: string;
+  gsd?: number;
+  bands?: number;
+  dtype?: string;
+  geotiff_path?: string;
+  thumbnail_preview?: string;
+  orchestrator_validation?: unknown;
 }
 
 // ---------------------------------------------------------------------------

@@ -29,24 +29,39 @@ export class AgenticAnalysisProvider implements AnalysisProvider {
       session_id: request.session_id,
     };
     if (request.asset_ids && request.asset_ids.length > 0) {
-      // orchestrator accepts asset_ids or image_ids; send both for compatibility
       (body as any).asset_ids = request.asset_ids;
       (body as any).image_ids = request.asset_ids;
-      // also synthesize assets minimal for CRS gate
-      (body as any).assets = request.asset_ids.map((id) => ({
-        asset_id: id,
-        modality: id.toLowerCase().includes("sar") || id.toLowerCase().includes("s1") ? "sar" : "optical",
-        crs: "EPSG:32617",
-        gsd: 10.0,
-      }));
+      // Enrich asset_ids → assets[] with real CRS/GSD/width/height from upload store
+      // so orchestrator _normalize_assets passes with ALLOW_SYNTHETIC_ASSETS=false.
+      try {
+        const { assetStore } = await import('../../store/assetStore');
+        const enriched = assetStore.getMany(request.asset_ids);
+        if (enriched.length > 0) {
+          (body as any).assets = enriched.map(a => ({
+            asset_id: a.asset_id,
+            crs: (a as any).crs,
+            gsd: (a as any).gsd ?? 10.0,
+            width: (a as any).width,
+            height: (a as any).height,
+            bands: (a as any).bands,
+            filename: a.filename,
+          }));
+        }
+      } catch {}
+      // Fallback: orchestrator image_pipeline.resolve_asset will also try filesystem lookup
     }
     if (request.spatial_refs) (body as any).spatial_refs = request.spatial_refs;
 
     let sessionId: string;
     try {
+      const authHeader = (request as any)._authHeader as string | undefined;
       const res = await fetch(`${ORCH}/api/v1/task`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(authHeader ? { Authorization: authHeader } : {}),
+        },
         body: JSON.stringify(body),
         signal,
       });
@@ -68,26 +83,25 @@ export class AgenticAnalysisProvider implements AnalysisProvider {
       return;
     }
 
-    // 2. Prefer orchestrator SSE (single connection, no poll spam). Fallback to polling.
-    // First try GET /api/v1/task/{id}/stream if orchestrator exposes it; else poll.
-    // SSE attempt — fails fast if 404, then falls through to polling.
+    // 2. Prefer orchestrator SSE — use native async iterable (undici/Node fetch) with ReadableStream fallback
     try {
+      const authHeader2 = (request as any)._authHeader as string | undefined;
       const sseRes = await fetch(`${ORCH}/api/v1/task/${encodeURIComponent(sessionId)}/stream`, {
-        headers: { Accept: "text/event-stream" },
+        headers: {
+          Accept: "text/event-stream",
+          ...(authHeader2 ? { Authorization: authHeader2 } : {}),
+        },
         signal,
       } as any);
       if (sseRes.ok && sseRes.body) {
-        const reader = (sseRes.body as any).getReader?.() ?? null;
-        // Node 18+ fetch does not expose getReader; fallback to text streaming via async iter
-        // If SSE works, yield events directly and return — no polling.
-        // We keep polling as fallback, so we only use SSE when it actually streams.
-        // For now, drain via polling path if body is not a readable stream.
-        if (!reader) {
-          // SSE endpoint exists but not streamable in this runtime — fall through to polling
-        } else {
-          const decoder = new TextDecoder();
-          let buf = "";
-          let lastStatusSSE: string | undefined;
+        const decoder = new TextDecoder();
+        let buf = "";
+        let lastStatusSSE: string | undefined;
+        // Unified async iteration: supports both Web ReadableStream (getReader) and Node Readable (async iterable)
+        const body: any = sseRes.body;
+        const isWebStream = typeof body.getReader === "function";
+        if (isWebStream) {
+          const reader = body.getReader();
           while (true) {
             const { value, done } = await reader.read();
             if (done) break;
@@ -106,18 +120,35 @@ export class AgenticAnalysisProvider implements AnalysisProvider {
             }
             if (signal.aborted) return;
           }
-          if (lastStatusSSE === "completed") return;
+        } else {
+          // Node Readable async iterable path (undici)
+          for await (const chunk of body as AsyncIterable<Uint8Array>) {
+            buf += decoder.decode(chunk as Uint8Array, { stream: true });
+            let idx;
+            while ((idx = buf.indexOf("\n\n")) !== -1) {
+              const frame = buf.slice(0, idx);
+              buf = buf.slice(idx + 2);
+              const dataLine = frame.split("\n").find((l: string) => l.startsWith("data: "));
+              if (!dataLine) continue;
+              try {
+                const ev = JSON.parse(dataLine.slice(6)) as ExecutionEvent;
+                yield ev as ExecutionEvent;
+                if ((ev as any).event === "query_completed" || (ev as any).event === "final_answer") lastStatusSSE = "completed";
+              } catch {}
+            }
+            if (signal.aborted) return;
+          }
         }
+        if (lastStatusSSE === "completed") return;
       }
     } catch {
       // SSE not available — fall through to polling
     }
 
-    const seen = new Set<number>();
+    const seen = new Set<string>();
     let lastStatus: string | undefined;
     let attempts = 0;
-    // NO TIME LIMIT for demo — poll indefinitely until completed/failed/cancelled
-    const maxAttempts = Number(process.env.ORCH_POLL_MAX_ATTEMPTS ?? 100000);
+    const maxAttempts = Math.min(Number(process.env.ORCH_POLL_MAX_ATTEMPTS ?? 32), 64); // cap 64 *1.2s ≈ 77s, respects TOTAL_BUDGET 15s
     while (attempts < maxAttempts) {
       if (signal.aborted) return;
       attempts++;
@@ -137,12 +168,11 @@ export class AgenticAnalysisProvider implements AnalysisProvider {
           result?: Record<string, unknown>;
           events: Array<{ event: string; payload?: Record<string, unknown>; timestamp?: number }>;
         };
-        // yield new events in order
-        for (let i = 0; i < data.events.length; i++) {
-          if (seen.has(i)) continue;
-          seen.add(i);
-          const ev = data.events[i]!;
-          // normalize to ExecutionEvent
+        // dedupe by payload id/timestamp, not index (reorders safe)
+        for (const ev of data.events) {
+          const dedupKey = `${ev.event}:${ev.timestamp ?? ''}:${JSON.stringify(ev.payload).slice(0, 80)}`;
+          if (seen.has(dedupKey)) continue;
+          seen.add(dedupKey);
           yield {
             event: ev.event as ExecutionEvent["event"],
             payload: ev.payload ?? {},

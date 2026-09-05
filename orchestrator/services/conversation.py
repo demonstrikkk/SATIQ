@@ -24,7 +24,11 @@ from orchestrator.services.query_analyzer import detect_followup_intent
 MEM_HISTORY: Dict[str, List[Dict[str, Any]]] = {}  # fallback cache
 
 def _sqlite_path() -> Path:
-    return Path("orchestrator/storage/memory.db")
+    try:
+        from orchestrator.core.config import get_settings
+        return Path(get_settings().sqlite_path)
+    except Exception:
+        return Path("orchestrator/storage/memory.db")
 
 def _ensure_sqlite():
     p = _sqlite_path()
@@ -111,7 +115,32 @@ async def _try_pgvector_retrieve(session_id: str, query: str, top_k: int = 3) ->
     except Exception:
         return []
 
+async def load_history_hybrid(session_id: str, query: str, n: int = 5) -> List[Dict[str, Any]]:
+    """Orchestrated hybrid — working(3) + episodic hybrid(6) + semantic(2), per memory_orchestrator."""
+    recency = load_history(session_id, n=n)
+    try:
+        from orchestrator.memory.memory_orchestrator import retrieve_episodic
+        sem = await retrieve_episodic(query, session_id, top_k=n)
+        # sem already hybrid 0.7 vector + 0.3 BM25 + session boost
+        seen_q = {h.get("query") for h in recency}
+        extra: List[Dict[str, Any]] = []
+        for hit in sem:
+            doc = hit.get("document", "")
+            # dedupe by exact query or doc overlap >0.6
+            is_dup = any(h.get("query") and h["query"] in doc for h in recency)
+            if not is_dup:
+                extra.append({"query": doc[:200], "rag_hit": hit, "_semantic": True, "score": hit.get("hybrid_score", hit.get("similarity", 0))})
+        merged = recency + sorted(extra, key=lambda x: x.get("score", 0), reverse=True)
+        return merged[:n]
+    except Exception:
+        return recency
+
+
 def save_history(session_id: str, entry: Dict[str, Any]) -> None:
+    # preserve query_original if entry was followup-augmented — store original for next RAG
+    if entry.get("query_original"):
+        entry = dict(entry)
+        entry["query"] = entry["query_original"]
     MEM_HISTORY.setdefault(session_id, []).append(entry)
     # SQLite persist — primary store for chat memory
     try:
@@ -151,6 +180,25 @@ def save_history(session_id: str, entry: Dict[str, Any]) -> None:
         existing.append(entry)
         existing = existing[-20:]
         path.write_text(json.dumps(existing, indent=2))
+    except Exception:
+        pass
+    # async RAG + consolidation — fire-and-forget with loop fallback
+    try:
+        import asyncio, time as _t
+        from orchestrator.memory.rag_store import add_turn
+        turn_id = str(int(_t.time() * 1000))
+        query = entry.get("query") or ""
+        ans = (entry.get("task_output") or {}).get("answer_text") or entry.get("answer_text") or ""
+        meta = {"task_type": entry.get("task_type",""), "image_ids": entry.get("image_ids") or []}
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(add_turn(session_id, turn_id, query, ans, meta))
+            # background condensation into semantic store
+            from orchestrator.memory.memory_orchestrator import consolidate
+            loop.create_task(consolidate(session_id))
+        except RuntimeError:
+            # no running loop (e.g., sync test) — best-effort skip; will index on next async turn
+            pass
     except Exception:
         pass
 

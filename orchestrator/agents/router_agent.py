@@ -42,8 +42,9 @@ async def router_node(state: GraphState) -> GraphState:
             state["temporal_spatial_hint"] = "change_with_spatial"  # type: ignore
     except Exception:
         pass
-    # call Qwen (sync, with fallback)
-    result = call_qwen_router(query, assets)
+    # call Qwen off event loop (Groq sync blocks 8s) — free loop for SSE
+    import asyncio as _asyncio_router
+    result = await _asyncio_router.to_thread(call_qwen_router, query, assets)
     task_type = result.get("task_type","vqa")
     # cross-check task vs input config (orchestrator legality check)
     num_assets = len(assets) or len(state.get("image_ids") or [])

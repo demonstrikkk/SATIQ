@@ -94,7 +94,7 @@ def indices_as_channels(bands: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
     merged.update(idx)
     return merged
 
-# helper for dummy pipeline: generate fake bands and compute indices for trace
+# LEGACY helper removed — fail-closed per SIH directive (no dummy trace).
+# Strict spectral indices require real bands B04/B08 etc. Missing bands → error/null, not synthetic 0.42.
 def dummy_indices_trace() -> Dict[str, float]:
-    """Return dummy mean values for trace when real bands not loaded."""
-    return {"ndvi_mean": 0.42, "ndwi_mean": -0.12, "ndbi_mean": 0.18, "evi_mean": 0.35}
+    raise RuntimeError("dummy_indices_trace forbidden — missing bands must return error/null (fail-closed, no synthetic)")

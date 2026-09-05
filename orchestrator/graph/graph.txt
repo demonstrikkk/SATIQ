@@ -1,21 +1,23 @@
 
+CURRENT SYSTEM (8-node LangGraph state graph: 7 happy + terminal error_handler, MAX_ATTEMPTS=2 total — Ollama qwen3.5:9b ONLY)
+
 START
-  → Input Validator (CRS hard gate)
-    → (fail) → Error Handler → END
-    → (pass) → Router (Mocked Qwen 3.5 9B) → Planner (Mocked Qwen 3.5 9B)
-      → FAN-OUT (architectural intent):
-        ├─ Preprocessing (tiling + dummy co-reg) ─┐
-        └─ Encoder Selector (rule) → Encoder Compat ─┘
-      → barrier_before_coreg (join) → Co-reg Gate (SSIM ≥0.75, bypass if requires_coreg=false)
-        → (skip single-image VQA/grounding) → Vision Encoder
-        → (pass) → Vision Encoder (dummy SatMAE/SSL4EO/Prithvi/CROMA)
-        → (fail & retry<2) ↺ Preprocessing (direct, bypass barrier on retry)
-        → (fail max) → Error Handler → END
-        → Vision Encoder → Multimodal Fusion → Task-Specific Agent
-          → Tile Manager (state service: preprocessing tile creation + task_agent per-tile done) → Post-Processing (conf gate + chart + stitch)
-            → (retry conf<0.6, <3) ↺ Task Agent
-            → (ok) → Response Composer (Mocked Qwen 3.5 9B) → END
-            → (fail) → Error Handler → END
-ACTUAL CODE EXECUTION (sequential for Pregel reliability):
-  planner → preprocessing → encoder_selector → encoder_compat → coreg_gate (internal bypass) → vision_encoder ...
-  See MERMAID_ACTUAL_CODE for LangGraph-generated PNG.
+  → Input Validator (CRS hard gate • GSD>0 • 100Mpix • 16-4000 chars • jailbreak • request_key/deadline 45s wait_for, budget enforced)
+    → (fail permanent: empty_query/greeting/out_of_scope/too_long/too_short/injection/crs_mismatch/malformed) → Error Handler → END
+    → (pass) → Coreference Resolver (alias → [RESOLVED:bbox] from entity_registry + ts, 4-tier working <1k)
+      → Router (Ollama qwen3.5:9b ROUTER_TOOLS 4 via to_thread)
+        → Planner (Ollama qwen3.5:9b REGISTERED_TOOLS 10 + registry + RAG 4-tier retrieve_for_planner hybrid 0.7/0.3 + decay, PlanSchema success_condition step cap 10)
+          → (skip_models: greeting/chitchat/help/out_of_scope/REFUSE) → Response Composer (Ollama stream 2048, thinking_delta)
+          → (geospatial: vqa/grounding/change_vqa/optical_sar_fusion) → Task Agent (VRAM_SEMAPHORE 2 + queue 4 → 503 + queue_position SSE, to_thread → shim + reproject_to_target EPSG:4326 warp + crop)
+            → model1_shim: GeoChat-7B → ask_geochat → {text,confidence:None}
+            → model2_shim: GroundingDINO 2-98% → run_inference → bbox_xyxy + bbox_normalized
+            → model3_shim: Prithvi indices+fusion + Vicuna
+            → model4_shim: CROMA 12+2 → per_modality
+            → (queue_full 503 permanent → Error Handler; MODEL_NOT_LINKED permanent; MODEL_INFERENCE_ERROR transient→retry 1)
+            → Post-Processing (conf≥0.6, bbox [0,1], chart real only, evidence grounding, <2 retries)
+              → (retry <2) ↺ Task Agent
+              → (fail) → Error Handler
+              → (ok) → Response Composer → END
+          → Error Handler → END
+
+Paths: Composer 100MB createObjectURL → gateway/upload duplex:half 60s (.geotiff/.gtiff/.jp2) → orchestrator/storage/ingest + image_pipeline.resolve_asset + reproject warp → shim raw path. Memory: working 3 + episodic hybrid (vector+BM25+decay, where=session_id, 90d) + semantic (180d consolidation) + state Redis 1h. Metrics: p50/p95/p99 + vram peak/queue. Weights: scripts/download_weights.py --model all (HF_TOKEN).

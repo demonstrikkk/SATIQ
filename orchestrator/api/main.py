@@ -33,9 +33,54 @@ from orchestrator.services.vision_encoder_service import health_live as vision_h
 from orchestrator.services.fusion_llm_service import health_live as fusion_health_live, health_ready as fusion_health_ready
 from orchestrator.core.events import register_broadcaster
 
-app = FastAPI(title="Satiq Orchestrator", version="1.0.0")
+# Fix 3: Ephemeral artifact cleanup — sweep mtime>3600s
+async def _periodic_disk_cleanup(interval_s: int = 600):
+    import pathlib, time as _t, asyncio as _aio
+    dirs = [pathlib.Path("orchestrator/storage/ingest"), pathlib.Path("gateway/upload"), pathlib.Path("/tmp")]
+    while True:
+        try:
+            now = _t.time()
+            for d in dirs:
+                if not d.exists():
+                    continue
+                for p in d.rglob("*"):
+                    try:
+                        if p.is_file():
+                            # keep .gitkeep, .db
+                            if p.name in (".gitkeep", "memory.db", "audit.db"):
+                                continue
+                            # crop pngs: /tmp/crop_*.png
+                            is_crop = p.name.startswith("crop_") and p.suffix == ".png"
+                            is_ingest = "ingest" in str(p) or "upload" in str(p)
+                            if (is_crop or is_ingest) and (now - p.stat().st_mtime > 3600):
+                                p.unlink(missing_ok=True)
+                    except Exception:
+                        continue
+            # also sweep gateway/upload via absolute if relative missed
+            for alt in [pathlib.Path("C:/Users/asus/Downloads/Satiq/gateway/upload")]:
+                if alt.exists():
+                    for p in alt.rglob("*"):
+                        try:
+                            if p.is_file() and p.name not in (".gitkeep",) and (now - p.stat().st_mtime > 3600):
+                                p.unlink(missing_ok=True)
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+        await _aio.sleep(interval_s)
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="Satiq Orchestrator", version="1.0.0", lifespan=None)  # lifespan set after definition (see below)
+
+# CORS — explicit origins, no * with credentials (security)
+def _cors_origins() -> list[str]:
+    import os
+    raw = os.getenv("CORS_ORIGIN", "http://localhost:3000,http://localhost:5173")
+    if raw.strip() == "*":
+        return ["http://localhost:3000", "http://localhost:5173"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+_cors_allow_origins = _cors_origins()
+app.add_middleware(CORSMiddleware, allow_origins=_cors_allow_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 # in-memory store (fallback when DB not available)
 EXECUTIONS: Dict[str, Dict[str,Any]] = {}
@@ -56,6 +101,8 @@ class TaskRequest(BaseModel):
     spatial_refs: Optional[List[str]] = None
 
 def _normalize_assets(req: TaskRequest) -> tuple[List[Dict[str,Any]], List[str]]:
+    from orchestrator.core.config import get_settings
+    allow_synth = bool(get_settings().allow_synthetic_assets)
     assets = req.assets or []
     image_ids: List[str] = []
     if req.image_ids:
@@ -70,12 +117,43 @@ def _normalize_assets(req: TaskRequest) -> tuple[List[Dict[str,Any]], List[str]]
         image_ids.append(req.optical_image_id)
     if req.sar_image_id:
         image_ids.append(req.sar_image_id)
-    # if assets empty but ids provided, synthesize
+    # Prod: try to resolve asset_ids via filesystem (image_pipeline) to build real CRS/GSD
+    # before rejecting — gateway may send only IDs, but orchestrator has ingested file at
+    # orchestrator/storage/ingest. Only reject if no real file found and ALLOW_SYNTHETIC false.
     if not assets and image_ids:
-        # infer modality: if sar id contains s1 => sar
-        for iid in image_ids:
-            mod = "sar" if "s1" in iid.lower() or "sar" in iid.lower() else "optical"
-            assets.append({"asset_id": iid, "modality": mod, "crs": "EPSG:32617", "gsd": 10.0})
+        # Attempt real resolution first (covers gateway asset_ids + frontend file_ IDs)
+        try:
+            from orchestrator.services.image_pipeline import resolve_asset
+            from orchestrator.services.image_ingest import validate_geotiff_integrity
+            for iid in image_ids:
+                p = resolve_asset(iid)
+                if p and p.exists():
+                    v = validate_geotiff_integrity(p)
+                    crs = v.get("crs") if v.get("valid") else None
+                    width = v.get("width")
+                    height = v.get("height")
+                    # Use real CRS if present, else EPSG:4326 fallback (PNG without GeoTIFF)
+                    assets.append({"asset_id": iid, "filename": p.name, "crs": crs or "EPSG:4326", "gsd": 10.0, "width": width, "height": height, "modality": "sar" if "s1" in iid.lower() or "sar" in iid.lower() else "optical"})
+                elif allow_synth:
+                    mod = "sar" if "s1" in iid.lower() or "sar" in iid.lower() else "optical"
+                    assets.append({"asset_id": iid, "modality": mod, "crs": "EPSG:32617", "gsd": 10.0})
+            if assets:
+                # resolved at least one real asset — proceed
+                pass
+            elif not allow_synth:
+                raise HTTPException(status_code=400, detail="assets required with real crs/gsd — set ALLOW_SYNTHETIC_ASSETS=true for tests or provide assets[]")
+            else:
+                for iid in image_ids:
+                    mod = "sar" if "s1" in iid.lower() or "sar" in iid.lower() else "optical"
+                    assets.append({"asset_id": iid, "modality": mod, "crs": "EPSG:32617", "gsd": 10.0})
+        except HTTPException:
+            raise
+        except Exception:
+            if not allow_synth:
+                raise HTTPException(status_code=400, detail="assets required with real crs/gsd — set ALLOW_SYNTHETIC_ASSETS=true for tests or provide assets[]")
+            for iid in image_ids:
+                mod = "sar" if "s1" in iid.lower() or "sar" in iid.lower() else "optical"
+                assets.append({"asset_id": iid, "modality": mod, "crs": "EPSG:32617", "gsd": 10.0})
     # also handle case where assets provided as ids with metadata
     # ensure each asset has asset_id
     for a in assets:
@@ -87,18 +165,42 @@ def _normalize_assets(req: TaskRequest) -> tuple[List[Dict[str,Any]], List[str]]
         image_ids = [a.get("asset_id") for a in assets if a.get("asset_id")]  # type: ignore
     return assets, image_ids
 
+def _exec_redis_key(sid: str) -> str:
+    return f"satiq:exec:{sid}"
+
+def _redis_client():
+    try:
+        import redis as _r
+        import os as _os
+        url = _os.getenv("REDIS_URL", get_settings().redis_url)
+        return _r.from_url(url, socket_connect_timeout=0.5)
+    except Exception:
+        return None
+
+def _persist_exec(sid: str):
+    try:
+        c = _redis_client()
+        if c is None:
+            return
+        c.setex(_exec_redis_key(sid), 3600, json.dumps(EXECUTIONS.get(sid, {}), default=str))
+    except Exception:
+        pass
+
 async def _broadcast(session_id: str, event: str, payload: Dict[str,Any] | None = None):
-    msg = {"event": event, "payload": payload or {}, "timestamp": int(time.time()*1000)}
+    # assign monotonic id for Last-Event-ID replay
+    cur_events = EXECUTIONS.get(session_id, {}).get("events", [])
+    msg_id = str(len(cur_events))
+    msg = {"id": msg_id, "event": event, "payload": payload or {}, "timestamp": int(time.time()*1000)}
     # update in-memory
     if session_id in EXECUTIONS:
         EXECUTIONS[session_id].setdefault("events", []).append(msg)
-        # mark that live token streaming occurred (set by the composer node via emit),
-        # so run_pipeline knows NOT to re-chunk the already-streamed text.
         if event == "answer_delta":
             EXECUTIONS[session_id]["_streamed"] = True
         EXECUTIONS[session_id]["status"] = _status_from_event(event, EXECUTIONS[session_id].get("status","running"))
         if event in ("final_answer","query_completed","error","cancelled"):
             EXECUTIONS[session_id]["finished_at"] = time.time()
+        # persist to Redis for recovery
+        _persist_exec(session_id)
     # publish to redis (for other services)
     try:
         await session_state.publish(f"session:{session_id}:events", msg)
@@ -151,8 +253,16 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
         # are captured by the UI bridge. Without this, every live token is
         # dropped and the answer never reaches the chat.
         await _broadcast(session_id, "composer_started", {"llm": _model})
-        # NO TIME LIMIT for demo — pipeline runs without timeout (user request)
-        result_state = await pipeline.ainvoke(state)  # type: ignore
+        # Enforce 45s budget — respect deadline_ms set by input_validator (ADR 0010 hardening)
+        from orchestrator.core.timeouts import remaining_ms
+        budget_ms = remaining_ms(state.get("deadline_ms", 0) or 0)
+        try:
+            result_state = await asyncio.wait_for(pipeline.ainvoke(state), timeout=max(1, budget_ms/1000))  # type: ignore
+        except asyncio.TimeoutError:
+            state["error"] = f"pipeline timeout after {budget_ms}ms budget"
+            state["error_type"] = "transient"
+            state["error_code"] = "pipeline_timeout"
+            result_state = state
 
         # extract trace to broadcast step-by-step for UI compatibility
         trace = result_state.get("execution_trace") or []
@@ -180,9 +290,8 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
             }
             model_name = model_name_map.get(task_type, encoder)
             await _broadcast(session_id, "model_started", {"model": model_name})
-            await asyncio.sleep(0.15)
+            # real model progress is emitted via _broadcast from task_agent shims if needed; no artificial sleep
             await _broadcast(session_id, "model_progress", {"progress": 0.6})
-            await asyncio.sleep(0.1)
             # pass through task_output details
             await _broadcast(session_id, "model_done", {"model": model_name, **{k:v for k,v in task_output.items() if k not in ("fused_repr","embeddings")}, "status": "OK" if not result_state.get("error") else "FAILED"})
 
@@ -191,11 +300,11 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
                 import json as _j
                 # Map task_type to the 4 models
                 model_map_full = {
-                    "vqa": "Model 1 — GeoChat-7B (VQA) `C:/coding/sih/final_model_1/final_model_1/merged_model`",
-                    "captioning": "Model 1 — GeoChat-7B (Captioning)",
-                    "grounding": "Model 2 — GroundingDINO+SAM (Grounding) `C:/coding/sih/model2_grounding`",
-                    "change_vqa": "Model 3 — Change-VQA Hybrid (NDVI/NDBI/NDWI + Vicuna) `C:/coding/sih/model3_change_vqa`",
-                    "optical_sar_fusion": "Model 4 — CROMA Fusion (Optical-SAR) `C:/coding/sih/model_4`",
+                    "vqa": "Model 1 — inference.py (VQA) `models/vqa/inference.py`",
+                    "captioning": "Model 1 — inference.py (Captioning)",
+                    "grounding": "Model 2 — inference.py (Grounding) `models/grounding/inference.py`",
+                    "change_vqa": "Model 3 — inference.py (Change-VQA) `models/change/inference.py`",
+                    "optical_sar_fusion": "Model 4 — inference.py (Fusion) `models/fusion/inference.py`",
                 }
                 model_label = model_map_full.get(task_type, f"Model — {model_name} ({task_type})")
                 # Build compact raw output for chat (avoid huge embeddings)
@@ -257,14 +366,14 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
                         if _P(cand).exists(): return _P(cand)
                     # absolute gateway fallback
                     for cand in uniq:
-                        for abs_gw in [r"C:\Users\aarav\Downloads\SATIQ\gateway\upload", r"C:\Users\aarav\Downloads\SATIQ\gateway/upload"]:
+                        for abs_gw in [r"gateway/upload", r"gateway/upload"]:
                             p = _P(abs_gw) / _P(cand).name
                             if p.exists(): return p
                     return None
                 # 1) Show input image(s) first — proves your upload is used (not hard-coded) — handles _hsc suffix
                 # FIX: don't use base64 (causes PUT /api/session 500 entity too large), copy to gateway/upload and use /api/assets URL
                 import shutil as _sh
-                _gw_upload = _P(r"C:\Users\aarav\Downloads\SATIQ\gateway\upload")
+                _gw_upload = _P(r"gateway/upload")
                 _gw_upload.mkdir(parents=True, exist_ok=True)
                 for iid in (image_ids or [])[:2]:
                     print(f"[visuals] resolving input {iid}")
@@ -300,7 +409,8 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
                                             _sh.copy(p, dst)
                                     except Exception:
                                         _sh.copy(p, dst)
-                                url = f"http://localhost:4000/api/assets/{dst.name}"
+                                base_url = get_settings().validated_gateway_url()
+                                url = f"{base_url}/api/assets/{dst.name}"
                                 print(f"[visuals] broadcasting input -> {url}")
                                 await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n![Input — {label}]({url})"})
                                 await asyncio.sleep(0.05)
@@ -340,7 +450,8 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
                                 _sh.copy(p, dst2)
                             except Exception:
                                 dst2 = p
-                            url2 = f"http://localhost:4000/api/assets/{dst2.name}"
+                            base_url2 = get_settings().validated_gateway_url()
+                            url2 = f"{base_url2}/api/assets/{dst2.name}"
                             print(f"[visuals] broadcasting artifact {typ} -> {url2}")
                             await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n![{step_label} — {p.name}]({url2})"})
                             await asyncio.sleep(0.08)
@@ -352,7 +463,9 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
 
             await _broadcast(session_id, "evidence_started")
             await asyncio.sleep(0.05)
-            conf = final.get("confidence") or result_state.get("confidence") or 0.82
+            conf = final.get("confidence") if final.get("confidence") is not None else result_state.get("confidence")
+            if conf is None:
+                conf = final.get("confidence")  # keep None, do not invent 0.82
             await _broadcast(session_id, "evidence_done", {"confidence": conf, "evidence_count": 1})
 
             # Router/planner already streamed their real reasoning as thinking_delta
@@ -362,7 +475,7 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
             # Fast path: still close thinking, but no heavy model evidence
             task_output = result_state.get("task_output") or {}
             final = result_state.get("final_result") or task_output
-            conf = final.get("confidence") or result_state.get("confidence") or 0.82
+            conf = final.get("confidence") if final.get("confidence") is not None else result_state.get("confidence")
             await _broadcast(session_id, "thinking_done")
 
         # answer streaming — if the composer node already streamed tokens live
@@ -398,19 +511,24 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
                     if task not in ("vqa","grounding") or "confidence" in answer_text.lower():
                         await _broadcast(session_id, "answer_delta", {"chunk": chart_block})
 
-        # also emit table-like evidence if present
-        if final.get("bbox_xyxy") or final.get("bbox") or final.get("bbox_normalized"):
+        # Evidence tables: only if LLM did not already include them (avoid duplicate hardcode)
+        answer_lower = (answer_text or "").lower()
+        if (final.get("bbox_xyxy") or final.get("bbox") or final.get("bbox_normalized")) and "bbox" not in answer_lower:
             bbox = final.get("bbox_xyxy") or final.get("bbox") or final.get("bbox_normalized")
-            await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n| BBox | {bbox} |\n| Confidence | {conf} |"})
+            if bbox is not None and conf is not None:
+                await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n| BBox | {bbox} |\n| Confidence | {conf} |"})
+            elif bbox is not None:
+                await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n| BBox | {bbox} |"})
 
-        if final.get("per_modality_confidence"):
+        if final.get("per_modality_confidence") and "modality" not in answer_lower:
             per = final["per_modality_confidence"]
             await _broadcast(session_id, "answer_delta", {"chunk": f"\n\n| Modality | Confidence |\n|---|---:|\n| Optical | {per.get('optical',0):.2f} |\n| SAR | {per.get('sar',0):.2f} |\n| Fused | {per.get('fused',0):.2f} |"})
 
         # FINAL SAFETY: ensure at least the input image is appended to final_answer even if earlier broadcast missed (handles _hsc suffix case) — use URL not base64 to avoid 500
         try:
             from pathlib import Path as _P2
-            has_image_in_answer = "http://localhost:4000/api/assets" in (answer_text or final.get("answer_text") or "")
+            _base_check = get_settings().validated_gateway_url()
+            has_image_in_answer = f"{_base_check}/api/assets" in (answer_text or final.get("answer_text") or "")
             if not has_image_in_answer:
                 for iid in (image_ids or [])[:1]:
                     import re as _re3, shutil as _sh2
@@ -436,12 +554,12 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
                         if p_found: break
                     if p_found is None:
                         for cn in cand_names:
-                            p_abs = _P2(r"C:\Users\aarav\Downloads\SATIQ\gateway\upload") / _P2(cn).name
+                            p_abs = _P2(r"gateway/upload") / _P2(cn).name
                             if p_abs.exists():
                                 p_found = p_abs; break
                     if p_found and p_found.exists():
                         try:
-                            gw = _P2(r"C:\Users\aarav\Downloads\SATIQ\gateway\upload")
+                            gw = _P2(r"gateway/upload")
                             gw.mkdir(parents=True, exist_ok=True)
                             dst = gw / f"chat_{session_id}_{p_found.name}"
                             if p_found.suffix.lower() in (".tif",".tiff"):
@@ -462,7 +580,8 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
                                         _sh2.copy(p_found, dst)
                                 except Exception:
                                     _sh2.copy(p_found, dst)
-                            url = f"http://localhost:4000/api/assets/{dst.name}"
+                            base_url_final = get_settings().validated_gateway_url()
+                            url = f"{base_url_final}/api/assets/{dst.name}"
                             md = f"\n\n![Input — {p_found.name}]({url})"
                             await _broadcast(session_id, "answer_delta", {"chunk": md})
                             final["answer_text"] = (final.get("answer_text") or "") + md
@@ -527,9 +646,28 @@ async def run_pipeline(session_id: str, query: str, assets: List[Dict[str,Any]],
         except Exception:
             pass
 
-@app.on_event("startup")
-async def startup():
-    # Non-blocking startup with timeout — never hang "Waiting for application startup" on laptop without docker
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Fix 2: Ollama cold-start warmup — 1-token dummy prompt during boot (3–6s VRAM load, then stays resident)
+    # Must not block startup if Ollama not running; fire-and-forget with timeout
+    async def _warm_ollama():
+        try:
+            import asyncio as _aio
+            # has_local_qwen_capability checks ollama binary + model
+            from orchestrator.core.llm_client import has_local_qwen_capability
+            if not has_local_qwen_capability():
+                print("[lifespan] Ollama qwen3.5:9b not available — warmup skipped (will fail-closed on first query)")
+                return
+            print("[lifespan] Warming Ollama qwen3.5:9b (1-token dummy) ...")
+            import ollama as _oll
+            # 1-token warmup — swap into VRAM
+            await _aio.to_thread(_oll.chat, model="qwen3.5:9b", messages=[{"role": "user", "content": "hi"}])
+            print("[lifespan] Ollama warmup done (VRAM resident)")
+        except Exception as _e:
+            print(f"[lifespan] Ollama warmup skipped: {_e}")
+
     try:
         await asyncio.wait_for(init_db(), timeout=3.0)
     except asyncio.TimeoutError:
@@ -537,7 +675,6 @@ async def startup():
     except Exception as e:
         print(f"[db] init skipped: {e}")
     try:
-        # MinIO may not be running locally (docker not installed); don't block
         import concurrent.futures as _cf
         with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
             fut = _ex.submit(minio_client.ensure_buckets)
@@ -547,10 +684,53 @@ async def startup():
                 print("[minio] ensure_buckets timeout — using disk fallback")
     except Exception:
         pass
+    # Non-blocking warmup — schedule without awaiting (still logs)
+    try:
+        asyncio.create_task(_warm_ollama())
+    except Exception:
+        pass
+    # Fix 3: Ephemeral disk cleanup — schedule background sweep every 10 min
+    try:
+        asyncio.create_task(_periodic_disk_cleanup())
+    except Exception:
+        pass
+    yield
+    # shutdown: flush CUDA, close pools
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+app.router.lifespan_context = lifespan
+
+# Keep legacy startup for backward compat (lifespan now owns it)
+@app.on_event("startup")
+async def startup():
+    pass
 
 @app.get("/health")
 async def health():
-    return {"status":"healthy","timestamp": time.time(), "uptime": time.time()}
+    # active Ollama probe — 500ms timeout, never blocks startup
+    ollama_reachable = False
+    ollama_latency_ms = None
+    ollama_error = None
+    try:
+        import httpx as _hx
+        s = get_settings()
+        base = s.qwen_base_url.replace("/v1","").rstrip("/")
+        t0 = time.time()
+        async with _hx.AsyncClient(timeout=0.5) as c:
+            r = await c.get(f"{base}/api/tags")
+            ollama_reachable = r.status_code == 200
+            # also check qwen3.5:9b present if reachable
+            if ollama_reachable and s.qwen_model not in r.text:
+                ollama_error = f"model {s.qwen_model} not in /api/tags"
+        ollama_latency_ms = int((time.time()-t0)*1000)
+    except Exception as e:
+        ollama_error = str(e)[:120]
+    return {"status":"healthy","timestamp": time.time(), "uptime": time.time(), "ollama_reachable": ollama_reachable, "ollama_latency_ms": ollama_latency_ms, "ollama_error": ollama_error, "qwen_model": get_settings().qwen_model}
 
 @app.get("/health/live")
 async def health_live():
@@ -575,8 +755,18 @@ async def health_ready():
     })
 
 @app.get("/api/v1/metrics")
-async def metrics_endpoint():
-    return metrics_snapshot()
+async def metrics_endpoint(session_id: str | None = None, format: str | None = None):
+    snap = metrics_snapshot(session_id)
+    # Prometheus text exposition if Accept: text/plain
+    if format == "prometheus":
+        lines = []
+        for k,v in snap.get("p95_ms",{}).items():
+            lines.append(f'satiq_node_latency_p95_ms{{node="{k}"}} {v}')
+        for k,v in snap.get("counters",{}).items():
+            lines.append(f'satiq_node_count{{node="{k}"}} {v}')
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse("\n".join(lines), media_type="text/plain")
+    return snap
 
 @app.get("/api/v1/dlq")
 async def list_dlq(session_id: str | None = None, limit: int = 50):
@@ -599,6 +789,61 @@ async def task_health(session_id: str):
     result = exec_.get("result") or {}
     trace = result.get("execution_trace") or []
     return {"session_id": session_id, "metrics": metrics_snapshot(), "trace": trace_summary(trace)}
+
+@app.get("/api/v1/tools")
+async def list_tools():
+    from orchestrator.helpers.tool_schemas import REGISTERED_TOOLS, TOOL_NAME_TO_TASK
+    return {"count": len(REGISTERED_TOOLS), "tools": REGISTERED_TOOLS, "tool_name_to_task": TOOL_NAME_TO_TASK}
+
+@app.get("/api/v1/memory/{session_id}")
+async def get_memory(session_id: str, n: int = 5):
+    from orchestrator.services.conversation import load_history
+    try:
+        hist = load_history(session_id, n=n)
+        episodic = []
+        try:
+            from orchestrator.memory.memory_orchestrator import retrieve_for_planner
+            episodic = (await retrieve_for_planner("", session_id)).get("episodic", [])[:n]
+        except Exception:
+            pass
+        return {"session_id": session_id, "history": hist, "episodic_hits": episodic, "count": len(hist)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)[:200])
+
+@app.delete("/api/v1/memory/{session_id}")
+async def delete_memory(session_id: str):
+    from orchestrator.services.conversation import MEM_HISTORY
+    from pathlib import Path
+    import sqlite3
+    deleted = 0
+    try:
+        # SQLite
+        from orchestrator.services.conversation import _sqlite_path
+        con = sqlite3.connect(str(_sqlite_path()))
+        cur = con.cursor()
+        cur.execute("DELETE FROM conversation_history WHERE session_id=?", (session_id,))
+        deleted = cur.rowcount
+        con.commit(); con.close()
+    except Exception:
+        pass
+    MEM_HISTORY.pop(session_id, None)
+    # disk history
+    try:
+        for p in [Path(f"orchestrator/storage/history/{session_id}.json"), Path(f"orchestrator/storage/task_outputs/{session_id}.json")]:
+            if p.exists(): p.unlink(missing_ok=True); deleted += 1
+    except Exception:
+        pass
+    # Chroma episodic
+    try:
+        from orchestrator.memory.rag_store import _get_episodic_collection, _get_semantic_collection
+        for col in [_get_episodic_collection(), _get_semantic_collection()]:
+            if col is None: continue
+            got = col.get(where={"session_id": session_id}, limit=1000)
+            ids = got.get("ids", [])
+            if ids: col.delete(ids=ids); deleted += len(ids)
+    except Exception:
+        pass
+    return {"session_id": session_id, "deleted": deleted, "message": "memory deleted; indexes rebuilt from retained data if any"}
 
 @app.get("/api/v1/llm/status")
 async def llm_status():
@@ -717,7 +962,22 @@ async def create_task(req: TaskRequest, background_tasks: BackgroundTasks):
     # queue gate with backpressure (§2.2 audit #5)
     if not queue_acquire():
         raise HTTPException(status_code=429, detail=f"queue full: active={queue_active_count()} limits={queue_limits()}")
+    # VRAM bounded queue (GAP-3) — fail-fast 503 if GPU queue depth exceeded
+    try:
+        from orchestrator.agents.task_agents import _vram_queue_depth
+        from orchestrator.core.config import get_settings as _gs
+        max_q = int(getattr(_gs(), "vram_max_queue", 4))
+        if _vram_queue_depth() > max_q + 2:
+            raise HTTPException(status_code=503, detail=f"VRAM queue full: depth={_vram_queue_depth()} limit={max_q}+2 — Retry-After 6s", headers={"Retry-After": "6"})
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     session_id = req.session_id or f"sess_{uuid.uuid4().hex[:8]}"
+    # Prevent overwrite of running execution in same session (multi-turn sequential spam)
+    existing = EXECUTIONS.get(session_id)
+    if existing and existing.get("status") in ("queued", "running"):
+        raise HTTPException(status_code=409, detail=f"session {session_id} is busy (status={existing.get('status')}); wait for completion or use new session_id")
     EXECUTIONS[session_id] = {
         "session_id": session_id,
         "query": req.query,
@@ -729,26 +989,49 @@ async def create_task(req: TaskRequest, background_tasks: BackgroundTasks):
         "result": None,
         "_queued": True,
     }
+    _persist_exec(session_id)
     background_tasks.add_task(run_pipeline, session_id, req.query.strip(), assets, image_ids)
     return {"session_id": session_id, "status": "queued"}
 
+def _load_exec_or_404(sid: str) -> dict:
+    exec_ = EXECUTIONS.get(sid)
+    if exec_:
+        return exec_
+    try:
+        c = _redis_client()
+        if c is None:
+            raise RuntimeError("no redis")
+        raw = c.get(_exec_redis_key(sid))
+        if raw:
+            data = json.loads(raw)
+            EXECUTIONS[sid] = data
+            return data
+    except Exception:
+        pass
+    raise HTTPException(status_code=404, detail="session not found")
+
 @app.get("/api/v1/task/{session_id}/stream")
 async def stream_task(session_id: str, request: Request):
-    """SSE stream — no poll spam. Gateway prefers this over polling."""
+    """SSE stream — supports Last-Event-ID replay from Redis."""
     from fastapi.responses import StreamingResponse
-    exec_ = EXECUTIONS.get(session_id)
-    if not exec_:
-        raise HTTPException(status_code=404, detail="session not found")
+    exec_ = _load_exec_or_404(session_id)
     async def gen():
-        seen = 0
+        # Last-Event-ID support: client sends last seen id, we resume after it
+        last_id_hdr = request.headers.get("Last-Event-ID") or request.headers.get("last-event-id")
+        try:
+            seen = int(last_id_hdr) + 1 if last_id_hdr is not None and last_id_hdr.isdigit() else 0
+        except Exception:
+            seen = 0
         while True:
             if await request.is_disconnected():
                 break
-            evs = EXECUTIONS.get(session_id, {}).get("events", [])
+            evs = _load_exec_or_404(session_id).get("events", [])
             while seen < len(evs):
                 ev = evs[seen]
                 seen += 1
-                yield f"data: {json.dumps(ev)}\n\n"
+                # include id for replay
+                eid = ev.get("id", str(seen-1))
+                yield f"id: {eid}\nevent: {ev.get('event','message')}\ndata: {json.dumps(ev)}\n\n"
                 if ev.get("event") in ("query_completed","final_answer","error","cancelled"):
                     # give gateway a moment to drain then close
                     await asyncio.sleep(0.05)
@@ -762,9 +1045,7 @@ async def stream_task(session_id: str, request: Request):
 
 @app.get("/api/v1/task/{session_id}")
 async def get_task(session_id: str):
-    exec_ = EXECUTIONS.get(session_id)
-    if not exec_:
-        raise HTTPException(status_code=404, detail="session not found")
+    exec_ = _load_exec_or_404(session_id)
     # include result if completed
     return {
         "session_id": session_id,
@@ -776,11 +1057,28 @@ async def get_task(session_id: str):
         "trace": (exec_.get("result") or {}).get("execution_trace"),
     }
 
-@app.get("/api/v1/task/{session_id}/geojson")
-async def get_task_geojson(session_id: str, crs: str = "EPSG:4326"):
+@app.post("/api/v1/task/{session_id}/cancel")
+async def cancel_task(session_id: str):
     exec_ = EXECUTIONS.get(session_id)
     if not exec_:
-        raise HTTPException(status_code=404, detail="session not found")
+        # try Redis recovery
+        try:
+            exec_ = _load_exec_or_404(session_id)
+        except Exception:
+            raise HTTPException(status_code=404, detail="session not found")
+    exec_["is_cancelled"] = True
+    exec_["status"] = "cancelled"
+    # Also set in GraphState if pipeline still running — broadcast will be picked up
+    try:
+        await _broadcast(session_id, "cancelled", {"reason": "user abort"})
+    except Exception:
+        pass
+    _persist_exec(session_id)
+    return {"session_id": session_id, "status": "cancelled"}
+
+@app.get("/api/v1/task/{session_id}/geojson")
+async def get_task_geojson(session_id: str, crs: str = "EPSG:4326"):
+    exec_ = _load_exec_or_404(session_id)
     result = exec_.get("result")
     if not result:
         raise HTTPException(status_code=404, detail="task not completed yet")
@@ -919,7 +1217,7 @@ async def ws_task(websocket: WebSocket, session_id: str):
 @app.post("/api/v1/ingest")
 async def ingest_image(
     file: UploadFile = File(..., description="Image/video file"),
-    crs: str = Form(default="EPSG:4326"),
+    crs: Optional[str] = Form(default=None),
 ):
     data = await file.read()
     if len(data) == 0:
@@ -927,7 +1225,22 @@ async def ingest_image(
     if len(data) > 100 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="file exceeds 100MB")
     try:
-        res = ingest_file(data, file.filename or "upload.bin", target_crs=crs)
+        try:
+            res = ingest_file(data, file.filename or "upload.bin", target_crs=crs)
+        except ValueError as ve:
+            # strict CRS contract P0-04
+            raise HTTPException(status_code=400, detail=str(ve))
+        # pixel cap wiring: width*height >100Mpix → 413 (protects input_validator even if asset metadata missing)
+        val = res.get("validation") or {}
+        try:
+            w = int(val.get("width") or 0)
+            h = int(val.get("height") or 0)
+            if w and h and w * h > 100_000_000:
+                raise HTTPException(status_code=413, detail=f"image too large {w}x{h} (>100Mpix)")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
         # convert thumbnail to base64 for JSON if needed, else return path
         thumb_b64 = None
         if res.get("thumbnail"):

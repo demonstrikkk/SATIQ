@@ -111,8 +111,8 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
       autoFocus = false,
       placeholder = "Ask anything about the selected imagery or region...",
       maxAttachments = 5,
-      maxFileSizeMB = 20,
-      acceptedFileTypes = [".tif", ".tiff", ".png", ".jpg", ".jpeg", ".jp2"],
+      maxFileSizeMB = 100,
+      acceptedFileTypes = [".tif", ".tiff", ".geotiff", ".gtiff", ".png", ".jpg", ".jpeg", ".jp2"],
       onSend,
       hints = DEFAULT_HINTS,
       className,
@@ -144,7 +144,15 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
       }
     }, [composerPrefill, setComposerPrefill]);
 
-    const { activeContexts, addContext, removeContext, addMessage, queuedMessages, enqueue, removeQueued, clearContexts } = useChatStore();
+    const { activeContexts, addContext, removeContext: storeRemove, addMessage, queuedMessages, enqueue, removeQueued, clearContexts } = useChatStore();
+    // Wrap remove to revoke blob URLs and prevent leaks
+    const removeContext = useCallback((id: string) => {
+      const cur = useChatStore.getState().activeContexts.find(c => c.id === id);
+      if (cur?.preview?.startsWith('blob:')) try { URL.revokeObjectURL(cur.preview); } catch {}
+      storeRemove(id);
+    }, [storeRemove]);
+    // Track pending uploads so Send waits for TIFF ingest to finish (fixes race where file_ temp ID hits pipeline)
+    const pendingUploadsRef = useRef<Set<string>>(new Set());
     const { globalStatus } = useExecutionStore();
     const { activeAnalysisId } = useWorkspaceStore();
     const active = useMemo(() => analyses.find((a) => a.id === activeAnalysisId), [activeAnalysisId]);
@@ -202,26 +210,26 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
           }
           return;
         }
-        // Create data URL synchronously for persistent preview (blob URLs revoke on reload)
+        // Preview via URL.createObjectURL (avoids Base64 33% bloat for 100MB)
         toAdd.forEach((f) => {
           const tempId = `file_${Date.now()}_${f.name}_${Math.random().toString(36).slice(2, 5)}`;
-          const reader = new FileReader();
-          reader.onload = () => {
-            const dataUrl = String(reader.result || "");
-            const preview = dataUrl.startsWith("data:") ? dataUrl : undefined;
-            addContext({ id: tempId, type: "image", label: f.name, file: f, preview } as Context);
-            // also keep blob for fast render until dataUrl ready if needed
-            if (!preview) {
-              try { const blobUrl = URL.createObjectURL(f); addContext({ id: tempId, type: "image", label: f.name, file: f, preview: blobUrl } as Context); } catch {}
-            }
-          };
-          try { reader.readAsDataURL(f); } catch {
-            try { const blobUrl = URL.createObjectURL(f); addContext({ id: tempId, type: "image", label: f.name, file: f, preview: blobUrl } as Context); } catch {}
+          try {
+            const blobUrl = URL.createObjectURL(f);
+            addContext({ id: tempId, type: "image", label: f.name, file: f, preview: blobUrl } as Context);
+          } catch {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const dataUrl = String(reader.result || "");
+              const preview = dataUrl.startsWith("data:") ? dataUrl : undefined;
+              if (preview) addContext({ id: tempId, type: "image", label: f.name, file: f, preview } as Context);
+            };
+            try { reader.readAsDataURL(f); } catch {}
           }
-          // Real upload — POST /api/upload with field 'image', auth header, show progress
+          // Real upload — POST /api/upload with field 'image', auth header
+          pendingUploadsRef.current.add(tempId);
           (async () => {
             const isMock = (import.meta as any).env?.VITE_USE_MOCK === "true" || (import.meta as any).env?.VITE_USE_MOCKS === "true";
-            if (isMock) return; // mock mode keeps temp id
+            if (isMock) { pendingUploadsRef.current.delete(tempId); return; }
             try {
               const tok = localStorage.getItem("satiq_token");
               const fd = new FormData();
@@ -234,7 +242,10 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
               if (!res.ok) {
                 const txt = await res.text().catch(() => "");
                 console.warn(`[upload] ${res.status}: ${txt.slice(0,120)}`);
-                toast.error(`Upload failed for ${f.name}: ${res.status}`);
+                // Keep tempId but surface error — pipeline will now try to resolve it via filesystem fallback
+                const ct = (res.headers.get('content-type') || '');
+                if (txt.includes('Invalid file type')) toast.error(`Upload rejected for ${f.name}: check extension .tif/.tiff/.geotiff/.jp2`);
+                else toast.error(`Upload failed for ${f.name}: ${res.status}`);
                 return;
               }
               const data = (await res.json()) as any;
@@ -243,14 +254,22 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
               if (assetId && assetId !== tempId) {
                 const cur = useChatStore.getState().activeContexts.find((c) => c.id === tempId);
                 if (cur) {
+                  if (cur.preview?.startsWith('blob:')) { /* keep blob URL for new id */ }
                   useChatStore.getState().removeContext(tempId);
                   useChatStore.getState().addContext({ id: assetId, type: "image", label: cur.label, file: f, preview: cur.preview } as Context);
+                  pendingUploadsRef.current.delete(tempId);
+                  pendingUploadsRef.current.add(assetId);
+                  // remove old pending marker after remap
+                  setTimeout(() => pendingUploadsRef.current.delete(assetId), 100);
                 }
+              } else {
+                pendingUploadsRef.current.delete(tempId);
               }
               toast.success(`Uploaded ${f.name}`);
             } catch (e) {
               console.warn(`[upload] failed for ${f.name}:`, e);
-              // keep temp context — still usable with temp id (orchestrator synthesizes asset)
+            } finally {
+              pendingUploadsRef.current.delete(tempId);
             }
           })();
         });
@@ -345,9 +364,19 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
         const q = (override ?? text).trim();
         const hasContent = q.length > 0 || activeContexts.length > 0;
         if (!hasContent) return;
-
+        // Wait for pending TIFF uploads to finish (max 15s) so asset_ids are real asset_ IDs with CRS
+        if (pendingUploadsRef.current.size > 0) {
+          toast.message(`Uploading ${pendingUploadsRef.current.size} file(s)… please wait`);
+          const start = Date.now();
+          while (pendingUploadsRef.current.size > 0 && Date.now() - start < 15000) {
+            await new Promise(r => setTimeout(r, 200));
+          }
+          if (pendingUploadsRef.current.size > 0) toast.error("Some uploads still pending — sending with available files");
+        }
+        // Re-snapshot after uploads settled (asset_ IDs replace file_ temps)
+        const liveContexts = useChatStore.getState().activeContexts;
         const finalMessage = q || "Analyze the attached imagery.";
-        const snapshot = [...activeContexts] as ChatContext[];
+        const snapshot = [...liveContexts] as ChatContext[];
 
         if (isBusy) {
           if (queuedMessages.length >= 5) {

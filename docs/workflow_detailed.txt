@@ -1,0 +1,50 @@
+
+WORKFLOW — HOW IT IS ACTUALLY WIRED (no mocks, Ollama qwen3.5:9b, 8-node)
+
+USER (query + image files)
+  │
+  ├─► Frontend Composer.tsx:114 — 100MB createObjectURL, FormData(image) + query + chips
+  │     └─► analysisClient.ts:57 — fetch POST /api/query SSE (abort-safe)
+  │           ├─► Gateway upload.ts:37 — createReadStream duplex:half 60s, randomUUID+.jp2, forward Authorization + w/h/crs/gsd, no base64
+  │           │     └─► Orchestrator POST /api/v1/ingest main.py:981 — ingest_file() → EXIF GPS + validate_geotiff (rasterio→PIL) + thumbnail → orchestrator/storage/ingest/<stem>.tif + DISK
+  │           └─► Gateway query.ts:23 inject Authorization → agentic-analysis.provider:40 (unified getReader/AsyncIterable, dedup event:ts:payload, maxAttempts 32, _authHeader)
+  │                 └─► ORCH POST /api/v1/task main.py:743 — _normalize_assets (allow_synthetic false → 400), CRS mismatch 400, pixel 100Mpix 413, queue_gate.acquire 429, EXECUTIONS[{id}] + Redis setex 3600 (satiq:exec:{id}), Last-Event-ID replay, BackgroundTasks run_pipeline
+  │
+  └─► RUN_PIPELINE main.py:155 — _broadcast query_started/input_done/composer_started (pre-creates assistant message so answer_delta not dropped), pipeline.ainvoke(state)
+
+        ┌─► input_validator agents/input_validator.py:23 — compute_request_key (sorted-hash) + deadline 45s (core/timeouts), len 16-4000, jailbreak guardrails/check_prompt_injection, CRS _crs_mismatch hard gate, GSD>0, pixel w*h>100Mpix, _corrupt/malformed, add_trace + structured_logging + metrics
+        │     ├─ fail (empty_query/greeting/injection/crs_mismatch/image_too_large/malformed) → error_handler → END
+        │     └─ pass (pending_llm) → coreference_resolver
+        │
+        ├─► coreference_resolver — entity_registry extract_entities + conversation augment_state_with_history (followup anchor)
+        │
+        ├─► router agents/router_agent.py:11 — query_analyzer detect_temporal/spatial/comparison → store query_analysis, to_thread call_qwen_router (Ollama)
+        │     └─► LLM Router core/llm_client call_qwen_router — ollama.chat(model=qwen3.5:9b, tools=ROUTER_TOOLS 4 tool_choice auto) → TOOL_NAME_TO_TASK mapping (run_vqa→vqa etc) else single-word regex vqa|grounding|change_vqa|optical_sar_fusion|greeting|chitchat|help|out_of_scope → registry/capability_registry validate_legality → add_trace + emit thinking_delta → sets state task_type/plan
+        │
+        ├─► planner agents/planner_agent.py:9 — registry_prompt_fragment + load_history_hybrid n=3 (Chroma satiq_conversation 8001 + SQLite) + rag_store.retrieve top_k3 + entity_registry + to_thread call_qwen_planner (Ollama, tools=REGISTERED_TOOLS 10)
+        │     └─► LLM Planner — ollama.chat tools=REGISTERED_TOOLS → tool run_fusion/run_grounding etc OR JSON GoalPlan (task_type, reasoning, required_assets, fusion_needed...) → helpers/guardrails validate_plan hard block (capability_illegal/step cap 10, PlanSchema) → sets requires_coreg, sub_queries, spatial_aggregation, region_of_interest via geocoder resolve_from_query, add_trace thinking_delta
+        │           ├─ query_cache TTLCache 3600/1024 (future) • checkpoint sorted-hash (hit → ok_cached)
+        │           ├─ fail permanent (guardrail) → error_handler
+        │           ├─ skip_models (greeting/chitchat/help/out_of_scope/REFUSE) ──► response_composer
+        │           └─ geospatial ──► task_agent
+        │
+        ├─► task_agent agents/task_agents.py:34 — VRAM_SEMAPHORE(2) + asyncio.to_thread, _resolve via services/image_pipeline resolve_asset (sanitize asset_/file_ → rglob gateway/upload↔storage/ingest, NO resampling), modality pick optical/sar, call_model via model_adapter MODEL_MAP shim pref → probe inference/ask_geochat
+        │     ├─► Shims: model1_shim load_model 4bit → ask_geochat(image_path,query) → text/conf None • model2_shim load_and_convert_s2 2-98% percentile → build_groundingdino → run_inference → bbox_xyxy pixel + bbox_normalized [0,1] (vendor config/train) • model3_shim compute_indices → classify_deltas threshold 0.05 → fusion_change_confidence → Vicuna text-only • model4_shim Model4Engine 12+2 bands → per_modality (vendor engine/data)
+        │     ├─► On error: MODEL_NOT_LINKED permanent → error_handler ; MODEL_INFERENCE_ERROR transient retry 1
+        │     ├─► Post-shim: FFmpeg crop_bbox_to_png CPU -vf crop w:h:x:y (only grounding, CPU no VRAM) → last_crop_path + tmp_files + entity_registry/coreference_map • visualisation_tool generate_visual_evidence.invoke (bbox overlay/change map/CROMA 4-panel) • result_merger sub_queries>1 • _cleanup_vram torch.cuda.empty_cache+gc
+        │     └─► ok → post_processing
+        │
+        ├─► post_processing agents/post_processing.py — conf≥0.6 gate (conf None bypass), bbox clamp [0,1], evidence grounding, chart real only via helpers/chart_spec build_chart_from_task_output validate_chart_spec else None (no dummy Sector A), add_trace
+        │     ├─ _needs_retry conf<0.6 retry≤3 ↺ task_agent
+        │     ├─ fail → error_handler
+        │     └─ ok → response_composer
+        │
+        ├─► response_composer agents/response_composer.py — call_qwen_composer_stream Ollama qwen3.5:9b stream 2048 tok (ollama.chat stream True), emit thinking_delta/answer_delta, chart block ```chart, bbox table, modality table, input image /api/assets/{name} (768px gateway/upload, not base64), save_history fire-and-forget → rag_store add_turn → Chroma + SQLite memory.db + audit.db execution_traces + MinIO rs-outputs
+        │     └─► main.py broadcast final_answer + query_completed → Redis persist + SSE answer_delta loop
+        │
+        └─► error_handler → END
+
+        SSE path: orchestrator GET /api/v1/task/{id}/stream (StreamingResponse + Last-Event-ID id: replay from Redis) → gateway agentic stream → Frontend StreamMarkdown (parse ?bbox= / alt JSON, else null, ApexCharts), MapLibre bbox overlay, ExecutionTrace panel
+
+        Side systems (always available, no mock):
+          checkpoint: compute_request_key sorted-hash (core/checkpoint) • timeouts: TOTAL 45s, per-node tight, check_deadline_or_raise • circuit_breaker: qwen_circuit (R/P/RC) • queue_gate: semaphore 429 + dlq • metrics + structured_logging • tiling: 512+64 Window via rasterio or passthrough • spectral: NDVI/NDWI pure numpy (dummy→raise) • geocoder: BUILTIN_GAZETTEER → WGS84 bbox • query_analyzer • embedding: bge pad 0 • transcription: Groq whisper no mock text

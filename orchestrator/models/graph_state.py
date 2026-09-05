@@ -19,13 +19,6 @@ class GraphState(TypedDict, total=False):
     # derived
     task_type: Annotated[TaskType, _last]
     plan: Annotated[Dict[str, Any], _last]  # StepPlan
-    encoder: Annotated[str, _last]  # satmae / ssl4eo / prithvi / croma
-    # preprocessing
-    tiles: Annotated[List[Dict[str, Any]], _last]
-    coreg: Annotated[Dict[str, Any], _last]  # ssim, residual, passed
-    # encodings
-    embeddings: Annotated[Dict[str, Any], _last]  # model -> vectors
-    fused_repr: Annotated[Optional[Dict[str, Any]], _last]
     # task outputs
     task_output: Annotated[Optional[Dict[str, Any]], _last]
     # postprocess
@@ -35,16 +28,9 @@ class GraphState(TypedDict, total=False):
     error: Annotated[Optional[str], _last]
     error_log: Annotated[List[str], _last]
     retry_count: Annotated[int, _last]
-    coreg_retries: Annotated[int, _last]
     execution_trace: Annotated[List[Dict[str, Any]], _last]
     # gating
     validation_passed: Annotated[bool, _last]
-    compat_passed: Annotated[bool, _last]
-    coreg_passed: Annotated[bool, _last]
-    # parallel join flags (for planner fan-out)
-    preprocessing_done: Annotated[bool, _last]
-    encoder_ready: Annotated[bool, _last]
-    requires_coreg: Annotated[bool, _last]
     # conversation & planner extensions
     conversation_history: Annotated[List[Dict[str, Any]], _last]
     followup_anchor: Annotated[Optional[str], _last]
@@ -55,9 +41,15 @@ class GraphState(TypedDict, total=False):
     sub_queries: Annotated[Optional[List[str]], _last]
     spatial_aggregation: Annotated[Optional[str], _last]
     query_analysis: Annotated[Optional[Dict[str, Any]], _last]
-    # resilience (§2.3,2.6,3)
-    deadline_ms: Annotated[int, _last]
+    # resilience — deadline_at authoritative, remaining derived (P0-03)
+    deadline_ms: Annotated[int, _last]  # alias for deadline_at (ms epoch) — authoritative
+    deadline_at: Annotated[int, _last]  # same as deadline_ms, preferred name
     request_key: Annotated[str, _last]
+    request_id: Annotated[str, _last]
+    trace_id: Annotated[str, _last]
+    tenant_id: Annotated[Optional[str], _last]
+    cancelled: Annotated[bool, _last]
+    attempt: Annotated[int, _last]
     checkpoint_hits: Annotated[List[str], _last]
     retry_policy: Annotated[Dict[str,int], _last]
     node_latencies: Annotated[Dict[str,int], _last]
@@ -75,6 +67,7 @@ class GraphState(TypedDict, total=False):
     coreference_map: Annotated[Dict[str, Any], _last]
     last_crop_path: Annotated[Optional[str], _last]
     tmp_files: Annotated[List[str], _last]
+    _needs_retry: Annotated[Optional[bool], _last]
 
 def new_state(session_id: str, query: str, assets: List[Dict[str,Any]] | None = None, image_ids: List[str] | None = None, user_id: str | None = None) -> GraphState:
     return GraphState(
@@ -85,25 +78,14 @@ def new_state(session_id: str, query: str, assets: List[Dict[str,Any]] | None = 
         image_ids=image_ids or [],
         task_type="unknown",
         plan={},
-        encoder="",
-        tiles=[],
-        coreg={},
-        embeddings={},
-        fused_repr=None,
         task_output=None,
         final_result=None,
         confidence=None,
         error=None,
         error_log=[],
         retry_count=0,
-        coreg_retries=0,
         execution_trace=[],
         validation_passed=False,
-        compat_passed=False,
-        coreg_passed=False,
-        preprocessing_done=False,
-        encoder_ready=False,
-        requires_coreg=False,
         conversation_history=[],
         followup_anchor=None,
         is_followup=False,
@@ -114,9 +96,16 @@ def new_state(session_id: str, query: str, assets: List[Dict[str,Any]] | None = 
         spatial_aggregation=None,
         query_analysis=None,
         deadline_ms=0,
+        deadline_at=0,
         request_key="",
+        request_id="",
+        trace_id="",
+        tenant_id=None,
+        cancelled=False,
+        attempt=1,
         checkpoint_hits=[],
-        retry_policy={"max_transient": 2, "max_confidence": 3, "max_coreg": 2},
+        retry_policy={"max_transient": 2, "max_confidence": 2, "max_coreg": 2},
+        _needs_retry=None,  # ephemeral flag for pipeline conditional
         node_latencies={},
         circuit_breaker_state="closed",
         degraded=False,

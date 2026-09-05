@@ -259,16 +259,51 @@ const SingleImageBlock = memo(function SingleImageBlock({ src, alt }: { src: str
   else if (lower.includes("sector") || lower.includes("built") || lower.includes("change")) { seed = 11; growth = 0.85; }
   else if (isSarLike) { seed = 22; growth = 0.5; }
 
+  // Real bbox only — extract from src query param ?bbox=x1,y1,x2,y2 or image_ids payload, never keyword heuristic
   let bbox: [number, number, number, number] | null = null;
   let label: string | null = null;
   let conf: number | null = null;
-  if (lower.includes("water") || lower.includes("water-body") || lower.includes("northern aoi")) {
-    bbox = [0.18, 0.09, 0.47, 0.42]; label = "water body"; conf = 0.87;
-  } else if (lower.includes("structure") || lower.includes("building") || lower.includes("crop")) {
-    bbox = [0.21, 0.11, 0.26, 0.14]; label = "building footprint"; conf = 0.89;
-  } else if (lower.includes("sector") || lower.includes("built-up") || lower.includes("change")) {
-    bbox = [0.62, 0.32, 0.84, 0.58]; label = "built-up expansion"; conf = 0.91;
+  // 1) Try bbox from URL query param ?bbox=0.18,0.09,0.47,0.42 or &bbox=
+  try {
+    const url = new URL(src, typeof window !== "undefined" ? window.location.origin : "http://localhost");
+    const bParam = url.searchParams.get("bbox") || url.searchParams.get("bbox_normalized");
+    if (bParam) {
+      const parts = bParam.split(",").map((v) => parseFloat(v.trim()));
+      if (parts.length === 4 && parts.every((n) => !isNaN(n) && n >= 0 && n <= 1.5)) {
+        bbox = parts as [number, number, number, number];
+        label = alt || "detection";
+        const cParam = url.searchParams.get("conf") || url.searchParams.get("confidence");
+        if (cParam) { const cv = parseFloat(cParam); if (!isNaN(cv)) conf = cv; }
+      }
+    }
+  } catch {}
+  // 2) Try alt JSON like {"bbox":[0.18,0.09,0.47,0.42],"label":"water body","conf":0.87}
+  if (!bbox && alt) {
+    try {
+      const parsed = JSON.parse(alt);
+      if (parsed && Array.isArray(parsed.bbox) && parsed.bbox.length === 4) {
+        const parts = parsed.bbox.map((v: any) => parseFloat(v));
+        if (parts.every((n: number) => !isNaN(n))) {
+          bbox = parts as [number, number, number, number];
+          label = parsed.label || alt;
+          if (parsed.conf !== undefined) conf = parseFloat(parsed.conf);
+          if (parsed.confidence !== undefined) conf = parseFloat(parsed.confidence);
+        }
+      }
+    } catch {}
+    // 3) Fallback: bbox in alt string like bbox:0.18,0.09,0.47,0.42
+    if (!bbox) {
+      const m = alt.match(/bbox[:=]\s*([0-9.,\s]+)/i);
+      if (m) {
+        const parts = m[1].split(",").map((v) => parseFloat(v.trim())).filter((n) => !isNaN(n));
+        if (parts.length === 4) {
+          bbox = parts as [number, number, number, number];
+          label = alt.slice(0, 40);
+        }
+      }
+    }
   }
+  // If no explicit bbox metadata, do NOT invent — leave null (keyword heuristic disabled)
   const hasBbox = !!bbox;
 
   return (

@@ -131,22 +131,37 @@ def validate_geotiff_integrity(path: str) -> Dict[str, Any]:
     except Exception as e:
         return {"valid": False, "error": str(e)[:200]}
 
-def convert_to_geotiff(src_path: str, dst_path: Optional[str] = None, crs: str = "EPSG:4326") -> str:
-    """Convert non-standard image (JPEG2000, WebP, BMP, PNG) to GeoTIFF pipeline input.
-    Uses rasterio if available, else Pillow + world file stub.
+def convert_to_geotiff(src_path: str, dst_path: Optional[str] = None, crs: str | None = None) -> str:
+    """Convert to GeoTIFF. Strict per P0-04: never infer EPSG:4326 for missing CRS.
+
+    - GeoTIFF/JP2 with embedded CRS → use it
+    - GeoTIFF/JP2 missing CRS + explicit crs supplied → use explicit (log provenance)
+    - PNG/JPEG without CRS and no explicit crs → FAIL (unsupported as geospatial raster)
+    - Missing CRS with no explicit → raise ValueError (caller must 400)
     """
     src = Path(src_path)
     if dst_path is None:
         dst_path = str(src.with_suffix(".tif"))
     dst = Path(dst_path)
-    # if already GeoTIFF via rasterio validation
+    suf = src.suffix.lower()
+    is_geospatial_type = suf in (".tif", ".tiff", ".geotiff", ".gtiff", ".jp2")
+    is_png_jpeg = suf in (".png", ".jpg", ".jpeg")
     v = validate_geotiff_integrity(src_path)
     if v.get("crs") and v.get("valid"):
-        # already valid GeoTIFF, copy if needed
         if src_path != dst_path:
             import shutil as _sh
             _sh.copy(src_path, dst_path)
         return dst_path
+    # PNG/JPEG without CRS is unsupported as geospatial unless explicit crs via API
+    if is_png_jpeg and not crs:
+        raise ValueError(f"PNG/JPEG unsupported as geospatial raster without explicit CRS — {src.name}: missing CRS and no ?crs= supplied")
+    # GeoTIFF missing CRS without explicit → 400, never infer 4326
+    if is_geospatial_type and not crs:
+        raise ValueError(f"GeoTIFF {src.name} missing embedded CRS and no explicit CRS supplied — reject (never infer EPSG:4326)")
+    # explicit CRS supplied → use it, else for already-valid we returned above
+    effective_crs = crs if crs else "EPSG:4326"  # only when caller explicitly passed (e.g. ingest ?crs=)
+    if not effective_crs:
+        raise ValueError(f"Cannot determine CRS for {src.name}")
     # try rasterio conversion
     try:
         import rasterio  # type: ignore
@@ -157,7 +172,7 @@ def convert_to_geotiff(src_path: str, dst_path: Optional[str] = None, crs: str =
         arr = np.array(pil)  # H,W,3
         # create dummy georeference at 0,0 10m GSD
         transform = from_origin(0, 0, 10, 10)
-        with rasterio.open(dst_path, "w", driver="GTiff", height=arr.shape[0], width=arr.shape[1], count=3, dtype=arr.dtype, crs=crs, transform=transform) as out:
+        with rasterio.open(dst_path, "w", driver="GTiff", height=arr.shape[0], width=arr.shape[1], count=3, dtype=arr.dtype, crs=effective_crs, transform=transform) as out:
             for i in range(3):
                 out.write(arr[:,:,i], i+1)
         return dst_path

@@ -5,32 +5,27 @@ import os
 MERMAID = """
 ```mermaid
 flowchart TD
-    START([START]) --> IV[input_validator\\nDeterministic gate\\nCRS hard check]
-    IV -->|pass| R[router\\nMocked Qwen 3.5 9B]
+    %% 8-node LangGraph state graph: 7 happy + terminal error_handler (cross-cutting failure sink, not linear step) — bounded retry MAX_ATTEMPTS=2
+    START([START]) --> IV[input_validator<br/>Deterministic gate<br/>CRS hard check • GSD>0 • 100Mpix • 16-4000 chars • jailbreak • deadline_at authoritative 45s]
     IV -->|fail| ERR[error_handler]
-    R --> P[planner\\nMocked Qwen 3.5 9B • StepPlan]
-    P --> PRE[preprocessing\\ntiling + dummy co-reg • writes tile_manager]
-    P --> ES[encoder_selector\\nrule-based]
-    ES --> EC[encoder_compat\\n gate]
-    EC -->|fail| ERR
-    EC -->|pass| BAR{{barrier_before_coreg<br/>join: preprocessing + encoder_compat}}
-    PRE --> BAR
-    BAR --> CG[coreg_gate\\nSSIM ≥0.75<br/>bypass if requires_coreg=false]
-    CG -->|skip single-image| VE[vision_encoder\\nSatMAE/SSL4EO/Prithvi/CROMA dummy]
-    CG -->|pass| VE
-    CG -->|fail retry<2| PRE
-    CG -->|fail max retries| ERR
-    VE --> F[fusion\\n dummy attention]
-    F --> TA[task_agent\\n VQA/Grounding/Change/Fusion]
-    TA -- per-tile done --> TM[tile_manager<br/>state service: stitch_ready?]
-    PRE -. tile creation .-> TM
-    TM --> PP[post_processing\\n confidence gate + chart + stitch]
-    PP -->|retry conf<0.6| TA
-    PP -->|ok| RC[response_composer\\nMocked Qwen 3.5 9B]
+    IV -->|pass| CR[coreference_resolver<br/>resolve [RESOLVED:bbox] • entity_registry 4-tier]
+    CR --> R[router<br/>Ollama qwen3.5:9b ROUTER_TOOLS 4<br/>ollama.chat tool_choice auto via to_thread]
+    R --> P[planner<br/>Ollama qwen3.5:9b REGISTERED_TOOLS 10 + registry + RAG 4-tier hybrid<br/>PlanSchema • guardrails • step cap 10 • success_condition]
+    P -->|skip_models=greeting/chitchat/help/out_of_scope| RC[response_composer<br/>Ollama qwen3.5:9b stream 2048 tok]
+    P -->|geospatial| TA[task_agent<br/>VRAM_SEMAPHORE 2 + queue 4 → 503 • asyncio.to_thread<br/>shim model1/2/3/4 + reproject_to_target warp • CPU crop]
+    TA -->|MODEL_NOT_LINKED permanent| ERR
+    TA -->|queue_full 503 permanent| ERR
+    TA -->|MODEL_INFERENCE_ERROR transient retry 1| TA
+    TA -->|ok| PP[post_processing<br/>conf≥0.6 • bbox clamp [0,1] • evidence grounding • chart real only]
+    PP -->|retry conf<0.6 <2| TA
     PP -->|fail| ERR
+    PP -->|ok| RC
     RC --> END([END])
-    ERR --> END
-    TA -->|error| ERR
+    ERR[error_handler<br/>cross-cutting terminal<br/>any node → ERR → response_composer] --> END
+    TA -. image_path via image_pipeline.resolve_asset + reproject warp .-> SHIMS{{"model1: GeoChat-7B<br/>model2: GroundingDINO Swin-T<br/>model3: Prithvi+Vicuna<br/>model4: CROMA"}}
+    SHIMS -. raw image + query .-> TA
+    P -. RAG retrieve_for_planner .-> MEM[(Memory 4-tier<br/>working + episodic hybrid 0.7/0.3 + semantic)]
+    TA -. metrics p50/p99 + vram .-> MON[(metrics)]
 ```
 """
 
@@ -38,23 +33,16 @@ MERMAID_ACTUAL_CODE = """
 ```mermaid
 flowchart TD
     START --> IV[input_validator]
-    IV -->|pass| R[router]
-    IV -->|fail| ERR
+    IV -->|pass| CR[coreference_resolver]
+    IV -->|fail| ERR[error_handler]
+    CR --> R[router]
     R --> P[planner]
-    P --> PRE[preprocessing]
-    PRE --> ES[encoder_selector]
-    ES --> EC[encoder_compat]
-    EC -->|pass| CG[coreg_gate\\n internal bypass if single-image]
-    EC -->|fail| ERR
-    CG -->|pass or skip| VE[vision_encoder]
-    CG -->|fail retry<2| PRE
-    CG -->|fail max| ERR
-    VE --> F[fusion]
-    F --> TA[task_agent]
-    TA --> TM[tile_manager]
-    TM --> PP[post_processing]
+    P -->|skip_models| RC[response_composer]
+    P -->|geospatial| TA[task_agent<br/>via shims]
+    TA -->|ok| PP[post_processing]
+    TA -->|error| ERR
     PP -->|retry| TA
-    PP -->|ok| RC[response_composer]
+    PP -->|ok| RC
     PP -->|fail| ERR
     RC --> END
     ERR --> END
@@ -62,26 +50,28 @@ flowchart TD
 """
 
 ASCII = """
+CURRENT SYSTEM (8-node LangGraph state graph: 7 happy + terminal error_handler, MAX_ATTEMPTS=2 total — Ollama qwen3.5:9b ONLY)
+
 START
-  → Input Validator (CRS hard gate)
-    → (fail) → Error Handler → END
-    → (pass) → Router (Mocked Qwen 3.5 9B) → Planner (Mocked Qwen 3.5 9B)
-      → FAN-OUT (architectural intent):
-        ├─ Preprocessing (tiling + dummy co-reg) ─┐
-        └─ Encoder Selector (rule) → Encoder Compat ─┘
-      → barrier_before_coreg (join) → Co-reg Gate (SSIM ≥0.75, bypass if requires_coreg=false)
-        → (skip single-image VQA/grounding) → Vision Encoder
-        → (pass) → Vision Encoder (dummy SatMAE/SSL4EO/Prithvi/CROMA)
-        → (fail & retry<2) ↺ Preprocessing (direct, bypass barrier on retry)
-        → (fail max) → Error Handler → END
-        → Vision Encoder → Multimodal Fusion → Task-Specific Agent
-          → Tile Manager (state service: preprocessing tile creation + task_agent per-tile done) → Post-Processing (conf gate + chart + stitch)
-            → (retry conf<0.6, <3) ↺ Task Agent
-            → (ok) → Response Composer (Mocked Qwen 3.5 9B) → END
-            → (fail) → Error Handler → END
-ACTUAL CODE EXECUTION (sequential for Pregel reliability):
-  planner → preprocessing → encoder_selector → encoder_compat → coreg_gate (internal bypass) → vision_encoder ...
-  See MERMAID_ACTUAL_CODE for LangGraph-generated PNG.
+  → Input Validator (CRS hard gate • GSD>0 • 100Mpix • 16-4000 chars • jailbreak • request_key/deadline 45s wait_for, budget enforced)
+    → (fail permanent: empty_query/greeting/out_of_scope/too_long/too_short/injection/crs_mismatch/malformed) → Error Handler → END
+    → (pass) → Coreference Resolver (alias → [RESOLVED:bbox] from entity_registry + ts, 4-tier working <1k)
+      → Router (Ollama qwen3.5:9b ROUTER_TOOLS 4 via to_thread)
+        → Planner (Ollama qwen3.5:9b REGISTERED_TOOLS 10 + registry + RAG 4-tier retrieve_for_planner hybrid 0.7/0.3 + decay, PlanSchema success_condition step cap 10)
+          → (skip_models: greeting/chitchat/help/out_of_scope/REFUSE) → Response Composer (Ollama stream 2048, thinking_delta)
+          → (geospatial: vqa/grounding/change_vqa/optical_sar_fusion) → Task Agent (VRAM_SEMAPHORE 2 + queue 4 → 503 + queue_position SSE, to_thread → shim + reproject_to_target EPSG:4326 warp + crop)
+            → model1_shim: GeoChat-7B → ask_geochat → {text,confidence:None}
+            → model2_shim: GroundingDINO 2-98% → run_inference → bbox_xyxy + bbox_normalized
+            → model3_shim: Prithvi indices+fusion + Vicuna
+            → model4_shim: CROMA 12+2 → per_modality
+            → (queue_full 503 permanent → Error Handler; MODEL_NOT_LINKED permanent; MODEL_INFERENCE_ERROR transient→retry 1)
+            → Post-Processing (conf≥0.6, bbox [0,1], chart real only, evidence grounding, <2 retries)
+              → (retry <2) ↺ Task Agent
+              → (fail) → Error Handler
+              → (ok) → Response Composer → END
+          → Error Handler → END
+
+Paths: Composer 100MB createObjectURL → gateway/upload duplex:half 60s (.geotiff/.gtiff/.jp2) → orchestrator/storage/ingest + image_pipeline.resolve_asset + reproject warp → shim raw path. Memory: working 3 + episodic hybrid (vector+BM25+decay, where=session_id, 90d) + semantic (180d consolidation) + state Redis 1h. Metrics: p50/p95/p99 + vram peak/queue. Weights: scripts/download_weights.py --model all (HF_TOKEN).
 """
 
 def save_mermaid(path: str = "orchestrator/graph/graph.mmd"):

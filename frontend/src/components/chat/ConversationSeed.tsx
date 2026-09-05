@@ -325,8 +325,8 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
   const processFiles = useCallback(
     (files: FileList | null) => {
       if (!files) return;
-      const maxSizeMB = 20;
-      const allowedTypes = [".tif", ".tiff", ".png", ".jpg", ".jpeg", ".jp2"];
+      const maxSizeMB = 100;
+      const allowedTypes = [".tif", ".tiff", ".geotiff", ".gtiff", ".png", ".jpg", ".jpeg", ".jp2"];
       const allowed = Array.from(files).filter(
         (f) => allowedTypes.some((ext) => f.name.toLowerCase().endsWith(ext)) && f.size <= maxSizeMB * 1024 * 1024
       );
@@ -345,20 +345,7 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
         let blobUrl: string | undefined;
         try { blobUrl = URL.createObjectURL(f); } catch {}
         addContext({ id, type: "image", label: f.name, file: f, preview: blobUrl } as Context);
-        try {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const dataUrl = String(reader.result || "");
-            if (dataUrl.startsWith("data:")) {
-              const cur = useChatStore.getState().activeContexts.find((c) => c.id === id);
-              if (cur) {
-                useChatStore.getState().removeContext(id);
-                useChatStore.getState().addContext({ id, type: "image", label: f.name, file: f, preview: dataUrl } as Context);
-              }
-            }
-          };
-          reader.readAsDataURL(f);
-        } catch {}
+        // upload via Composer's path - ConversationSeed only previews, actual upload happens on Send
       });
       if (fileRef.current) fileRef.current.value = "";
       setError(null);
@@ -765,7 +752,7 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".tif,.tiff,.png,.jpg,.jpeg,.jp2"
+                  accept=".tif,.tiff,.geotiff,.gtiff,.png,.jpg,.jpeg,.jp2"
                   multiple
                   hidden
                   onChange={onFileInputChange}

@@ -57,7 +57,13 @@ export async function executeRealAnalysis(
   const abort = signal ? null : new AbortController();
   const effectiveSignal = signal ?? abort!.signal;
   if (abort) currentAbort = abort;
-  else if (signal) currentAbort = { abort: () => {}, signal } as any;
+  else if (signal) {
+    // propagate external abort to internal tracking without no-op
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    signal.addEventListener('abort', onAbort, { once: true });
+    currentAbort = ctrl;
+  }
 
   let tok = await ensureAuth();
   let res = await fetch(`${GATEWAY}/api/query`, {
@@ -85,10 +91,16 @@ export async function executeRealAnalysis(
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     let msg = `POST /api/query ${res.status}: ${txt.slice(0, 300)}`;
-    if (res.status === 403) msg = `Access denied (403) — session belongs to another user. ${txt.slice(0,120)}`;
+    if (txt.includes("MODEL_NOT_LINKED") || txt.includes("MODEL_LOAD_ERROR")) {
+      msg = `MODEL_NOT_LINKED: Model weights not mounted. Run: python scripts/download_weights.py --model all && docker compose up --build — ${txt.slice(0,150)}`;
+      applyExecutionEvent({ event: "error", payload: { message: msg, code: "MODEL_NOT_LINKED" } });
+    } else if (res.status === 503 || txt.includes("VRAM_QUEUE_FULL") || txt.includes("queue_full")) {
+      msg = `GPU busy (503) — queue full, retry in 6s. ${txt.slice(0,120)}`;
+      applyExecutionEvent({ event: "error", payload: { message: msg, code: "queue_full" } });
+    } else if (res.status === 403) msg = `Access denied (403) — session belongs to another user. ${txt.slice(0,120)}`;
     else if (res.status === 429) msg = `Rate limited (429) — too many requests. ${txt.slice(0,120)}`;
     else if (res.status === 400) msg = `Validation failed (400): ${txt.slice(0,200)}`;
-    applyExecutionEvent({ event: "error", payload: { message: msg, code: String(res.status) } });
+    if (!msg.includes("MODEL_NOT_LINKED") && !msg.includes("queue_full")) applyExecutionEvent({ event: "error", payload: { message: msg, code: String(res.status) } });
     currentExecutionId = null; currentAbort = null;
     throw new Error(msg);
   }
@@ -172,40 +184,29 @@ export async function executeRealAnalysis(
       throw e;
     }
   } finally {
-    // Force completion when stream ends — fixes Stop glitch where response is done but isBusy stayed true
-    // This handles both normal (query_completed) and fast skip paths (greeting/out_of_scope)
+    // Only force completed if not already failed/cancelled — do not mask failures
     try {
       const { useChatStore } = await import("@/store/chat.store");
       const { useExecutionStore } = await import("@/store/execution.store");
       const exec = useExecutionStore.getState();
       const gs = exec.globalStatus;
       const isBusy = ["queued","planning","executing","aggregating","composing"].includes(gs as any);
-      if (isBusy) {
-        // Ensure any streaming message is closed
+      const isTerminalFailed = (gs as any) === "failed" || (gs as any) === "cancelled";
+      if (isBusy && !isTerminalFailed) {
         const msgs = useChatStore.getState().messages;
         const lastStreaming = msgs.find(m => m.role === "assistant" && (m as any).streaming);
         if (lastStreaming) {
           useChatStore.getState().setStreaming(lastStreaming.id, false);
           useChatStore.getState().setThinkingStreaming(lastStreaming.id, false);
         }
-        // Also close thinking if still open
         const lastThinking = msgs.find(m => m.role === "assistant" && (m as any).thinkingStreaming);
         if (lastThinking) {
           useChatStore.getState().setThinkingStreaming(lastThinking.id, false);
         }
-        // Force global to completed so isBusy becomes false and Stop hides / Send returns
-        // Only do this if we actually received some content or stream ended normally (not on explicit cancel/error)
         const hasContent = msgs.some(m => m.role === "assistant" && m.content.length > 0);
         if (hasContent || gs !== "idle") {
           useExecutionStore.getState().setGlobalStatus("completed" as any);
           useExecutionStore.getState().setComposerStatus("completed" as any);
-          // Also mark all pipeline steps as completed to stop spinners
-          const steps = exec.pipelineSteps;
-          const anyRunning = steps.some(s => s.status === "running");
-          if (anyRunning) {
-            // Let setGlobalStatus handle freezing timers, but ensure it ran
-            useExecutionStore.getState().setGlobalStatus("completed" as any);
-          }
         }
       }
     } catch {}

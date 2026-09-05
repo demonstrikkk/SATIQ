@@ -33,3 +33,18 @@ python-dotenv==1.0.1
 psutil==6.1.0
 pgvector==0.3.6
 sentence-transformers==2.7.0
+chromadb==0.5.20
+llama-index==0.11.20
+llama-index-vector-stores-chroma==0.2.1
+llama-index-embeddings-huggingface==0.3.1
+# --- Model runtime (GeoChat/GroundingDINO/Prithvi/CROMA) — CUDA 12.1: pip install torch --index-url https://download.pytorch.org/whl/cu121 ---
+torch==2.2.2
+torchvision==0.17.2
+transformers==4.41.2
+accelerate==0.30.1
+bitsandbytes==0.43.1
+opencv-python-headless==4.9.0.80
+matplotlib==3.8.4
+einops==0.8.0
+timm==0.9.12
+tenacity==8.5.0

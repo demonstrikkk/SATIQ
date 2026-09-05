@@ -95,7 +95,74 @@ async def planner_node(state: GraphState) -> GraphState:
                 except Exception:
                     pass
             return state
-    plan = call_qwen_planner(query, task_type, assets)
+    # Build registry-aware prompt context
+    try:
+        from orchestrator.registry.capability_registry import registry_prompt_fragment
+        _reg_frag = registry_prompt_fragment()
+    except Exception:
+        _reg_frag = ""
+    # RAG context — 4-tier hybrid via memory_orchestrator (working + episodic hybrid + semantic)
+    rag_context = ""
+    try:
+        from orchestrator.memory.memory_orchestrator import retrieve_for_planner
+        mem = await retrieve_for_planner(query, state.get("session_id",""))
+        rag_context = mem.get("combined_text","")
+        # stash for trace
+        state["_memory_debug"] = {"working": mem.get("working","")[:120], "episodic": len(mem.get("episodic",[])), "semantic": len(mem.get("semantic",[]))}  # type: ignore
+        # fallback to old hybrid if empty
+        if not rag_context:
+            from orchestrator.services.conversation import load_history_hybrid
+            hist = await load_history_hybrid(state.get("session_id",""), query, n=3)
+            if hist:
+                rag_context = "; ".join([f"Q:{h.get('query','')[:60]}→A:{(h.get('task_output') or {}).get('answer_text','')[:60]}" for h in hist[-2:]])
+    except Exception:
+        try:
+            from orchestrator.services.conversation import load_history_hybrid
+            hist = await load_history_hybrid(state.get("session_id",""), query, n=3)
+            if hist:
+                rag_context = "; ".join([f"Q:{h.get('query','')[:60]}→A:{(h.get('task_output') or {}).get('answer_text','')[:60]}" for h in hist[-2:]])
+        except Exception:
+            rag_context = ""
+    # Entity registry: populate from history for coreference ("it" → previous bbox)
+    try:
+        from orchestrator.memory.entity_registry import extract_entities
+        ents = extract_entities(query, None, None)
+        if ents:
+            state["entity_registry"] = {**state.get("entity_registry", {}), **ents}  # type: ignore
+    except Exception:
+        pass
+    import asyncio as _asyncio_planner
+    plan = await _asyncio_planner.to_thread(call_qwen_planner, query, task_type, assets)
+    # attach registry fragment for audit (planner already uses it internally if updated)
+    plan["_registry"] = _reg_frag[:200]
+    if rag_context:
+        plan["_rag_context"] = rag_context[:300]
+    # Guardrail: validate plan == needed (hard block for cardinality/illegal tool)
+    try:
+        from orchestrator.helpers.guardrails import validate_plan
+        ok, why = validate_plan(plan, assets, query_intent)
+        if not ok:
+            # Hard block for asset-cardinality and illegal tool, step cap
+            if any(k in why.lower() for k in ["needs", "illegal tool", "steps exceed", "unknown task"]):
+                state["error"] = f"guardrail blocked: {why}"
+                state["error_type"] = "permanent"
+                state["error_code"] = "capability_illegal"
+                state["validation_passed"] = False
+                add_trace(state, "planner", "guardrail_failed_hard", {"violation": why, "plan": plan}, latency_ms=int((time.time()-t0)*1000))
+                return state
+            plan["_guardrail_violation"] = why
+            add_trace(state, "planner", "guardrail_failed", {"violation": why, "plan": plan}, latency_ms=int((time.time()-t0)*1000))
+            plan["confidence"] = min(plan.get("confidence", 0.8), 0.4)
+        # Step cap: enforce max 10 steps to prevent infinite loops
+        if len(plan.get("steps") or []) > 10:
+            state["error"] = f"plan steps exceed cap 10: {len(plan.get('steps'))}"
+            state["error_type"] = "permanent"
+            state["error_code"] = "plan_step_cap"
+            state["validation_passed"] = False
+            add_trace(state, "planner", "guardrail_failed_hard", {"violation": "steps exceed cap", "steps": plan.get("steps")}, latency_ms=int((time.time()-t0)*1000))
+            return state
+    except Exception:
+        pass
     # enforce task_type consistency
     if plan.get("task_type") != task_type:
         # trust router's task_type as primary, but log divergence

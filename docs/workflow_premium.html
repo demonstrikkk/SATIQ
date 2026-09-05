@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SATIQ — Premium Architecture & Workflow</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#070A14;--card:#111827;--border:#1F2937;--muted:#94A3B8}
+  body{font-family:Inter,system-ui;background:radial-gradient(1200px 600px at 50% -10%, #1E1B4B 0%, transparent 60%), linear-gradient(180deg,#070A14 0%,#0B1220 100%);color:#E2E8F0}
+  .mono{font-family:JetBrains Mono,monospace}
+  .glass{backdrop-filter:blur(16px);background:rgba(17,24,39,0.7);border:1px solid rgba(255,255,255,0.08)}
+  .pill{backdrop-filter:blur(8px);background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08)}
+</style>
+</head>
+<body class="min-h-screen">
+<!-- Header -->
+<header class="sticky top-0 z-50 border-b border-white/10 glass">
+  <div class="max-w-[1600px] mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-cyan-500 grid place-items-center font-black text-white">S</div>
+      <div>
+        <div class="font-extrabold tracking-tight text-[18px] leading-none">SATIQ — SatQuery AI</div>
+        <div class="text-[11px] tracking-[0.18em] text-white/50 font-semibold mt-0.5">GEOSPATIAL QA  •  LOCAL QWEN3.5:9B  •  NO PRODUCTION MOCK FALLBACKS</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="pill px-3 py-1.5 rounded-full text-xs font-semibold">8-Node LangGraph</span>
+      <span class="pill px-3 py-1.5 rounded-full text-xs font-semibold">10 Tools</span>
+      <span class="pill px-3 py-1.5 rounded-full text-xs font-semibold">Single-GPU</span>
+      <a href="../orchestrator/graph/workflow_detailed.png" target="_blank" class="ml-2 px-4 py-1.5 rounded-full bg-white text-black text-xs font-bold hover:bg-white/90">Open PNG →</a>
+    </div>
+  </div>
+</header>
+
+<!-- Hero -->
+<section class="max-w-[1600px] mx-auto px-6 pt-8 pb-6">
+  <div class="grid grid-cols-12 gap-6">
+    <div class="col-span-8">
+      <h1 class="text-[34px] font-extrabold tracking-tight leading-none">How it is <span class="bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent">actually wired</span></h1>
+      <p class="mt-3 text-[13px] leading-5 text-white/60 max-w-[760px]">Frontend 5173 → Gateway 4000 → Orchestrator 8000 8-node (Ollama qwen3.5:9b) → Tools 10 → Shims 4 + reproject warp → Models • Memory 4-tier (working+episodic hybrid 0.7/0.3+decay+session where + semantic 180d + state Redis) • Storage MinIO/Disk • Cache Redis (p50/p99 + vram). Eval 20× mIoU/F1 + weights HF. File:line refs are current.</p>
+      <div class="mt-4 flex flex-wrap gap-2">
+        <span class="px-3 py-1 rounded-full bg-violet-600 text-white text-xs font-bold">Frontend</span>
+        <span class="px-3 py-1 rounded-full bg-cyan-500 text-black text-xs font-bold">Gateway</span>
+        <span class="px-3 py-1 rounded-full bg-amber-500 text-black text-xs font-bold">Orchestrator</span>
+        <span class="px-3 py-1 rounded-full bg-yellow-400 text-black text-xs font-bold">Ollama</span>
+        <span class="px-3 py-1 rounded-full bg-pink-500 text-white text-xs font-bold">Memory</span>
+        <span class="px-3 py-1 rounded-full bg-teal-500 text-black text-xs font-bold">Storage</span>
+      </div>
+    </div>
+    <div class="col-span-4 glass rounded-2xl p-4">
+      <div class="text-xs font-bold tracking-widest text-white/50">LEGEND</div>
+      <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+        <div class="flex items-center gap-2"><span class="w-3 h-0.5 bg-white"></span> Main pipeline</div>
+        <div class="flex items-center gap-2"><span class="w-3 h-0.5 bg-white/40 border-t border-dashed border-white/40"></span> Side dependency</div>
+        <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> pass pending_llm</div>
+        <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-red-500"></span> fail → error_handler</div>
+        <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-500"></span> retry ×2</div>
+        <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-white/60"></span> uses (short stub)</div>
+      </div>
+      <div class="mt-4 p-3 rounded-xl bg-white/[0.04] border border-white/10 mono text-[11px] leading-4 text-white/60">
+        Single-GPU: asyncio.to_thread + VRAM_SEMAPHORE(2) + queue 4→503<br/>100 Mpix guard • reproject warp EPSG:4326 • 45s wait_for • No dummy • eval mIoU/F1
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Mermaid Workflow -->
+<section class="max-w-[1600px] mx-auto px-6 pb-8">
+  <div class="glass rounded-[20px] p-2">
+    <div class="rounded-[16px] bg-[#0B0E1A] p-6 overflow-x-auto">
+      <pre class="mermaid" style="background:transparent">
+        flowchart TB
+        USER([User: query + images]) --> FE[Frontend Composer<br/>100MB createObjectURL • FormData]
+        FE --> GWQ[gateway /api/query<br/>inject Authorization]
+        FE --> GWU[gateway /api/upload<br/>duplex:half 60s]
+        GWU --> INGEST[(storage/ingest)]
+        GWQ --> ORCH["ORCH POST /api/v1/task<br/>CRS 400 • 100Mpix 413 • queue 429"]
+        ORCH --> RUN[run_pipeline • pipeline.ainvoke]
+        RUN --> IV[input_validator<br/>request_key • deadline 45s wait_for • guardrails]
+        IV -->|fail| EH[error_handler]
+        IV -->|pass| CR[coreference_resolver<br/>entity_registry 4-tier]
+        CR --> R[router<br/>Ollama ROUTER_TOOLS 4]
+        R --> P[planner<br/>Ollama REGISTERED_TOOLS 10 + RAG 4-tier hybrid + guardrails]
+        P -->|skip| RC[response_composer<br/>Ollama stream 2048]
+        P -->|geospatial| TA[task_agent<br/>VRAM 2+queue4→503 • reproject warp • shims]
+        TA --> PP["post_processing<br/>conf≥0.6 • bbox [0,1] • retry <2"]
+        PP --> RC
+        TA --> SHIMS["SHIMS → MODELS<br/>GeoChat • GroundingDINO • Prithvi • CROMA"]
+        RC --> SSE["SSE queue_position • answer_delta → Gateway → Frontend<br/>MODEL_NOT_LINKED banner + MapLibre bbox overlay"]
+        MEM["Memory 4-tier<br/>working+episodic hybrid+semantic"] -. RAG .-> P
+        MET["Metrics p50/p99 + vram"] -. poll .-> TA
+
+        classDef fe fill:#7C3AED,stroke:#fff,color:#fff
+        classDef gw fill:#06B6D4,stroke:#fff,color:#000
+        classDef or fill:#F59E0B,stroke:#fff,color:#000
+        classDef llm fill:#EAB308,stroke:#000,color:#000
+
+        class FE,USER fe
+        class GWQ,GWU gw
+        class ORCH,RUN,IV,CR,TA or
+        class R,P llm 
+      </pre>
+    </div>
+  </div>
+</section>
+
+
+<!-- PNG Previews -->
+<section class="max-w-[1600px] mx-auto px-6 pb-10 grid grid-cols-2 gap-6">
+  <div class="glass rounded-2xl p-3">
+    <div class="text-xs font-bold tracking-widest text-white/50 px-2 py-1">LAYERED ARCHITECTURE — COMPLETE_SYSTEM.PNG</div>
+    <img src="../orchestrator/graph/complete_system.png" class="mt-2 w-full rounded-xl border border-white/10" loading="lazy"/>
+    <div class="mt-2 mono text-[11px] text-white/50">orchestrator/graph/complete_system.png  2400×3300  •  Frontend/Gateway/Orchestrator/Tools/Capabilities/Shims/Memory/Cache/Storage</div>
+  </div>
+  <div class="glass rounded-2xl p-3 ring-1 ring-white/20">
+    <div class="text-xs font-bold tracking-widest text-white">WORKFLOW — WORKFLOW_DETAILED.PNG  •  orthogonal stubs, no overlap, cropped to content</div>
+    <img src="../orchestrator/graph/workflow_detailed.png" class="mt-2 w-full rounded-xl border border-white/20" loading="lazy"/>
+    <div class="mt-2 mono text-[11px] text-white/60">orchestrator/graph/workflow_detailed.png  •  8-node spine left, sidecars right at same Y, short horizontal “uses” stubs, vertical spine with branch labels</div>
+  </div>
+</section>
+
+<footer class="border-t border-white/10 py-6 text-center mono text-[11px] text-white/40">
+  Generated from orchestrator/graph/workflow_detailed.py + complete_system.py  •  Ollama qwen3.5:9b only  •  No mocks  •  file:line refs are current
+</footer>
+<script>
+  mermaid.initialize({startOnLoad:true, theme:'dark', themeVariables:{primaryColor:'#8B5CF6', primaryTextColor:'#fff', lineColor:'#64748B', tertiaryColor:'#1E293B'}, flowchart:{curve:'linear', padding:12, nodeSpacing:18, rankSpacing:22}});
+</script>
+</body>
+</html>

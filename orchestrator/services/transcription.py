@@ -49,23 +49,22 @@ def transcribe_audio(
     """
     s = get_settings()
     if not s.enable_voice:
-        return {"text": "", "error": "voice disabled (ENABLE_VOICE=false)", "_provider": "disabled", "_mock": True}
+        return {"text": "", "error": "voice disabled (ENABLE_VOICE=false)", "_provider": "disabled", "_mock": False}
 
-    # Mock if no key
+    # Fail-closed — no dummy transcription (user directive: no mock/fake)
     if not _pick_transcribe_key():
-        # deterministic mock transcription for offline testing
         return {
-            "text": "Describe the land-cover and major objects visible in this image.",
+            "text": "",
+            "error": "No GROQ_API_KEY for whisper-large-v3 — transcribe requires GROQ_API_KEY or local whisper (no dummy text)",
             "language": language or "en",
-            "duration": 2.1,
-            "_provider": "mock",
-            "_mock": True,
-            "_note": "No GROQ_API_KEY — returning dummy transcription. Set GROQ_API_KEY to use whisper-large-v3.",
+            "duration": 0,
+            "_provider": "error",
+            "_mock": False,
         }
 
     cli = get_groq_client()
     if cli is None:
-        return {"text": "", "error": "groq client unavailable", "_provider": "mock", "_mock": True}
+        return {"text": "", "error": "groq client unavailable", "_provider": "error", "_mock": False}
 
     try:
         # Groq whisper-large-v3 is OpenAI-compatible: audio.transcriptions.create
@@ -104,14 +103,12 @@ def transcribe_audio(
             "_mock": False,
         }
     except Exception as e:
-        # Fallback mock on error, but log
-        print(f"[groq stt fallback] {e}")
+        print(f"[groq stt error] {e}")
         return {
             "text": "",
             "error": str(e)[:300],
             "_provider": "groq",
-            "_mock": True,
-            "_fallback": True,
+            "_mock": False,
         }
 
 def transcribe_file(path: str, **kwargs) -> Dict[str, Any]:

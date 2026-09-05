@@ -74,16 +74,28 @@ export function applyExecutionEvent(ev: ExecutionEvent) {
   }
   if (ev.event === "query_completed") { setGlobalStatus("completed"); }
   if (ev.event === "error") {
-    // surface as assistant message if no final_answer
-    const msg = (ev.payload as any)?.message ?? "Analysis failed";
+    const code = (ev.payload as any)?.code ?? "";
+    const raw = (ev.payload as any)?.message ?? "Analysis failed";
+    let msg = raw;
+    // MODEL_NOT_LINKED dedicated banner (GAP-6) — keeps generic path for other errors
+    if (code === "MODEL_NOT_LINKED" || raw.includes("MODEL_NOT_LINKED") || raw.includes("MODEL_LOAD_ERROR")) {
+      msg = `⚠️ **Models not linked** — checkpoints absent at \`models/model{1..4}/\`\n\nRun:\n\`\`\`bash\npython scripts/download_weights.py --model all\n# or set HF_TOKEN for gated models\n\`\`\`\nThen: \`docker compose up --build\`\n\nSee \`docs/FRIEND_HANDOFF.md#weights\` for exact paths. Preflight: \`powershell -File scripts/preflight.ps1\` must show \`present\` for all 4.`;
+    } else if (code === "queue_full" || raw.includes("queue_full") || raw.includes("VRAM_QUEUE_FULL")) {
+      msg = `⏳ **GPU busy — queue full** (VRAM_SEMAPHORE 2, max queue 4). Retry in ~6s.\n\nTip: wait for current job or use \`GET /api/v1/metrics\` to see \`vram.queue_depth\`.`;
+    }
     if (lastAssistantId) {
-      appendChunk(lastAssistantId, `\n\n> ⚠️ ${msg}`);
+      appendChunk(lastAssistantId, `\n\n> ${msg}`);
       setStreaming(lastAssistantId, false);
       setThinkingStreaming(lastAssistantId, false);
       setThinkingCollapsed(lastAssistantId, true);
     }
     setComposerStatus("failed" as any);
     setGlobalStatus("failed" as any);
+  }
+  if (ev.event === "queue_position") {
+    const pos = (ev.payload as any)?.position ?? "?";
+    const wait = (ev.payload as any)?.estimated_wait_ms ?? 6000;
+    if (lastAssistantId) appendThinking(lastAssistantId, `⏳ GPU queue position ${pos} — est. wait ${wait}ms\n`);
   }
   if (ev.event === "cancelled") {
     if (lastAssistantId) {

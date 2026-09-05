@@ -9,7 +9,11 @@ from orchestrator.helpers.chart_spec import CHART_PROMPT_FRAGMENT
 
 def _confidence_explanation(final: Dict[str, Any], state: GraphState) -> str:
     parts = []
-    conf = final.get("confidence") or final.get("per_modality_confidence",{}).get("fused") or 0.82
+    conf = final.get("confidence")
+    if conf is None:
+        conf = final.get("per_modality_confidence",{}).get("fused") if isinstance(final.get("per_modality_confidence"), dict) else None
+    if conf is None:
+        return "Confidence not scored by model (no numeric estimate)"
     if conf >= 0.85:
         parts.append("High confidence based on clear spectral contrast")
     elif conf >= 0.70:

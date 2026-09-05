@@ -1,0 +1,159 @@
+```mermaid
+flowchart TB
+    %% ───────── CLIENT ─────────
+    subgraph Frontend["🖥️ Frontend 5173 — React + Vite + MapLibre"]
+        C1[Composer<br/>100MB + createObjectURL<br/>drag-drop + mic STT]
+        C2[Chat + StreamMarkdown<br/>bbox ?bbox= parse • chart ApexCharts<br/>heuristic disabled → null]
+        C3[MapLibre GeoCanvas<br/>bbox overlay]
+        C4[ExecutionTrace<br/>thinking_delta + answer_delta]
+        C5[analysisClient.ts<br/>abort-safe SSE • Finally only if !failed]
+        C1 --> C2 --> C3
+        C2 --> C4
+        C1 -. FormData image .-> C5
+    end
+
+    %% ───────── GATEWAY ─────────
+    subgraph Gateway["🚪 Gateway 4000 — Express + TS"]
+        G1[index.ts<br/>keepAlive 70s / headers 71s]
+        G2[routes/upload.ts<br/>createReadStream duplex:half 60s<br/>forward Authorization + w/h/crs/gsd]
+        G3[routes/query.ts<br/>inject Authorization]
+        G4[analysis/providers/agentic<br/>dedup event:ts:payload • maxAttempts 32<br/>getReader vs AsyncIterable + _authHeader]
+        G5[middleware/upload<br/>randomUUID + .jp2]
+        G6[middleware/rateLimiter<br/>key=userId||ip]
+        G1 --> G2 --> G3 --> G4
+    end
+
+    %% ───────── ORCHESTRATOR PIPE ─────────
+    subgraph Orchestrator["⚙️ Orchestrator 8000 — FastAPI + LangGraph 8-node (Ollama qwen3.5:9b ONLY)"]
+        direction TB
+        IV[input_validator<br/> CRS hard gate • GSD>0 • 100Mpix cap<br/>16-4000 chars • jailbreak • request_key/deadline 45s]
+        CR[coreference_resolver<br/>alias→[RESOLVED:bbox] • entity_registry <1ms]
+        R[router<br/>Ollama qwen3.5:9b • ROUTER_TOOLS 4<br/>tool_choice auto → via to_thread]
+        P[planner<br/>Ollama qwen3.5:9b + REGISTERED_TOOLS 10<br/>PlanSchema • guardrails • step cap 10<br/>RAG hybrid + registry_prompt_fragment]
+        TA[task_agent<br/>VRAM_SEMAPHORE 2 • asyncio.to_thread<br/>call_model → shim]
+        PP[post_processing<br/>conf≥0.6 • bbox clamp [0,1]<br/>evidence grounding • chart real only]
+        RC[response_composer<br/>Ollama qwen3.5:9b stream 2048 tok<br/>thinking_delta • ApexCharts]
+        EH[error_handler<br/>MODEL_NOT_LINKED permanent<br/>MODEL_INFERENCE_ERROR transient retry 1]
+        IV -->|fail| EH
+        IV -->|pass| CR --> R --> P
+        P -->|skip_models=greeting/chitchat/help/out_of_scope| RC
+        P -->|geospatial| TA
+        TA -->|MODEL_NOT_LINKED| EH
+        TA -->|ok| PP
+        PP -->|retry conf<0.6 x3| TA
+        PP -->|fail| EH
+        PP -->|ok| RC
+        EH --> ENDPIPE([END])
+        RC --> ENDPIPE
+    end
+
+    %% ───────── TOOLS ─────────
+    subgraph Tools["🧰 Tool Schemas (helpers/tool_schemas.py)"]
+        direction LR
+        T1[run_vqa<br/>model1 GeoChat-7B]
+        T2[run_grounding<br/>model2 GroundingDINO]
+        T3[run_change_vqa<br/>model3 Prithvi+Vicuna]
+        T4[run_fusion<br/>model4 CROMA]
+        T5[compute_spectral_indices<br/>NDVI/NDWI/NDBI/EVI fail-closed]
+        T6[calculate_area<br/>bbox+gsd→ha/km2]
+        T7[geocode_region<br/>gazetteer → WGS84 bbox]
+        T8[crop_bbox<br/>FFmpeg CPU -vf crop]
+        T9[generate_visual_evidence<br/>visualisation_tool]
+        T10[retrieve_history<br/>RAG top_k 3]
+    end
+
+    %% ───────── CAPABILITIES ─────────
+    subgraph Capabilities["📚 Capability Registry (capability_registry.py)"]
+        CAP1[vqa / captioning<br/>needs 1 opt]
+        CAP2[grounding<br/>needs 1 opt]
+        CAP3[change_vqa<br/>needs 2 opt]
+        CAP4[optical_sar_fusion<br/>needs opt+sar]
+        CAPD[DETERMINISTIC<br/>area/spectral]
+    end
+
+    %% ───────── SHIMS / MODELS ─────────
+    subgraph Shims["🤖 Shims — internal encoders (no external encoders)"]
+        S1[model1_shim<br/>load_model 4bit → ask_geochat]
+        S2[model2_shim<br/>load_and_convert_s2 2-98% → build_groundingdino → bbox xyxy]
+        S3[model3_shim<br/>compute_indices + classify_deltas + fusion_change_confidence]
+        S4[model4_shim<br/>Model4Engine → 12+2 bands → per_modality]
+        M1[(models/model1<br/>run_inference.py)]
+        M2[(models/model2<br/>visualize_pipeline_graph.py + vendor config/train)]
+        M3[(models/model3<br/>visualize_index_hybrid.py)]
+        M4[(models/model4<br/>infer.py + vendor engine/data)]
+        S1 --- M1
+        S2 --- M2
+        S3 --- M3
+        S4 --- M4
+    end
+
+    %% ───────── MEMORY ─────────
+    subgraph Memory["🧠 Memory — Hybrid RAG"]
+        MEM1[conversation.py<br/>load_history_hybrid n=3<br/>save_history fire-and-forget add_turn]
+        MEM2[rag_store.py<br/>Chroma satiq_conversation<br/> + SQLite fallback]
+        MEM3[entity_registry.py<br/>extract_entities alias→bbox]
+        MEM4[memory.db SQLite<br/>turn_history]
+        CHROMA[(Chroma 8001<br/>chroma_data volume)]
+        SQLITE[(SQLite<br/>orchestrator/storage/memory.db)]
+        MEM1 <--> MEM2 --> CHROMA
+        MEM1 <--> SQLITE
+        MEM3 --> MEM1
+    end
+
+    %% ───────── CACHE ─────────
+    subgraph Cache["⚡ Cache + Resilience"]
+        Q1[query_cache.py<br/>TTLCache 3600/1024]
+        Q2[TTLCache tile/encoder]
+        REDIS[(Redis<br/>satiq:exec:{id} setex 3600<br/>Last-Event-ID id: replay)]
+        CKPT[checkpoint<br/>sorted-hash request_key]
+        TO[timeouts<br/>TOTAL 45s • per-node tight]
+        CB[circuit_breaker<br/>qwen_circuit]
+        QG[queue_gate<br/>semaphore 429]
+        DLQ[dlq]
+        Q1 -.-> REDIS
+        CKPT -.-> REDIS
+        TO -.-> IV
+        CB -.-> R & P & RC
+    end
+
+    %% ───────── STORAGE ─────────
+    subgraph Storage["💾 Storage — MinIO + Disk fallback"]
+        MINIO[(MinIO 9000<br/>rs-outputs bucket)]
+        DISK[(Disk fallback<br/>orchestrator/storage/ingest<br/>orchestrator/storage/audit.db<br/>outputs/)]
+        GEO[(GeoTIFF ingest<br/>/api/v1/ingest → ingest_file<br/>EXIF GPS + validate_geotiff<br/>thumbnail)]
+        GEN[(geojson_export<br/>report_generator<br/>tiling 512+64 Window)]
+        MINIO --- DISK
+        GEO --> DISK
+    end
+
+    %% ───────── SERVICES ─────────
+    subgraph Services["🔧 Deterministic Services"]
+        SVC1[image_pipeline.resolve_asset<br/>sanitize asset_/file_ → rglob]
+        SVC2[ffmpeg_preprocessor<br/>crop_bbox_to_png CPU]
+        SVC3[spectral<br/>NDVI/NDWI/NDBI/EVI pure numpy<br/>dummy_indices_trace → raise]
+        SVC4[geocoder<br/>BUILTIN_GAZETTEER]
+        SVC5[transcription<br/>Groq whisper no mock]
+        SVC6[query_analyzer<br/>temporal/spatial/comparison]
+        SVC7[embedding<br/>bge pad 0]
+    end
+
+    %% ───────── CROSS LINKS ─────────
+    Frontend -->|POST /api/query<br/>SSE stream| Gateway
+    Gateway -->|POST /api/v1/task<br/>GET /api/v1/task/{id}/stream<br/>Last-Event-ID| Orchestrator
+    Gateway -->|POST /api/v1/ingest<br/>multipart| GEO
+    R <-->|tools| Tools
+    P <-->|tools| Tools
+    R & P <-. registry_prompt_fragment .-> Capabilities
+    TA <-. call_model .-> Shims
+    TA -. image_path via SVC1 .-> Shims
+    TA -. crop via SVC2 .-> Shims
+    P <-. RAG retrieve .-> Memory
+    CR <-. entity_registry .-> Memory
+    TA -. load_history_hybrid .-> Memory
+    PP -. evidence grounding .-> SVC3 & SVC4
+    Orchestrator <-. persist sat iq:exec .-> REDIS
+    Orchestrator <-. Q1 .-> Cache
+    Orchestrator --> Storage
+    Orchestrator --> Services
+```
+
