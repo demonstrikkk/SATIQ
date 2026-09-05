@@ -10,8 +10,8 @@ flowchart TB
     FE_CLIENT --> GW_U[gateway upload.ts:37<br/>createReadStream duplex:half 60s<br/>forward w/h/crs/gsd]
     GW_U --> INGEST[orchestrator POST /api/v1/ingest<br/>api/main.py:981 ingest_file<br/>EXIF GPS + validate_geotiff<br/>thumbnail → orchestrator/storage/ingest/<stem>.tif]
     INGEST --> DISK[(Disk orchestrator/storage/ingest)]
-    GW_Q --> ORCH_POST[ORCH POST /api/v1/task<br/>main.py:743 _normalize_assets<br/>CRS mismatch 400 • 100Mpix 413<br/>queue_gate.acquire 429<br/>EXECUTIONS[{id}] + Redis setex 3600]
-    ORCH_POST --> REDIS[(Redis satiq:exec:{id}<br/>_persist_exec + Last-Event-ID)]
+    GW_Q --> ORCH_POST[ORCH POST /api/v1/task<br/>main.py:743 _normalize_assets<br/>CRS mismatch 400 • 100Mpix 413<br/>queue_gate.acquire 429<br/>EXECUTIONS[(id)] + Redis setex 3600]
+    ORCH_POST --> REDIS[(Redis satiq-exec-id<br/>_persist_exec + Last-Event-ID)]
     ORCH_POST --> RUN[run_pipeline main.py:155<br/>_broadcast query_started/input_done/composer_started<br/>pipeline.ainvoke(state)]
 
     RUN --> IV[input_validator<br/>agents/input_validator.py:23<br/>request_key + deadline 45s<br/>len 16-4000 • jailbreak via guardrails/check_prompt_injection<br/>CRS hard gate _crs_mismatch • GSD>0 • pixel cap w*h>100Mpix<br/>_corrupt/malformed_geotiff]
@@ -19,14 +19,14 @@ flowchart TB
     IV -->|pass pending_llm| CR[coreference_resolver<br/>agents/coreference_resolver.py<br/>entity_registry extract_entities<br/>conversation augment_state_with_history]
 
     CR --> R[router<br/>agents/router_agent.py:11<br/>query_analyzer detect_temporal/spatial/comparison<br/>augment_state_with_history<br/>to_thread call_qwen_router]
-    R --> LLM_R{{Ollama qwen3.5:9b<br/>core/llm_client.py:500 call_qwen_router<br/>ollama.chat tools=ROUTER_TOOLS 4 tool_choice auto<br/>prompt single-word task_type}}
+    R --> LLM_R["Ollama qwen3.5:9b<br/>core/llm_client.py:500 call_qwen_router<br/>ollama.chat tools=ROUTER_TOOLS 4 tool_choice auto<br/>prompt single-word task_type}}
     LLM_R --> TOOL_R[/ROUTER_TOOLS<br/>helpers/tool_schemas.py:13<br/>run_vqa / run_grounding / run_change_vqa / run_fusion/]
     TOOL_R -. tool_call run_grounding .-> R
     R --> REG1[registry/capability_registry.py<br/>validate_legality + warn change_vqa<2 assets]
     R --> TRACE_R[(add_trace router ok<br/>emit thinking_delta)]
 
     R --> P[planner<br/>agents/planner_agent.py:9<br/>registry_prompt_fragment<br/>load_history_hybrid n=3 Chroma+SQLite<br/>rag_store.retrieve top_k 3<br/>entity_registry<br/>to_thread call_qwen_planner]
-    P --> LLM_P{{Ollama qwen3.5:9b<br/>core/llm_client.py:560 call_qwen_planner<br/>ollama.chat tools=REGISTERED_TOOLS 10<br/>JSON GoalPlan}}
+    P --> LLM_P["Ollama qwen3.5:9b<br/>core/llm_client.py:560 call_qwen_planner<br/>ollama.chat tools=REGISTERED_TOOLS 10<br/>JSON GoalPlan}}
     LLM_P --> TOOL_P[/REGISTERED_TOOLS<br/>MODEL 4 + DETERMINISTIC 6<br/>compute_spectral_indices fail-closed<br/>geocode_region / crop_bbox / retrieve_history/]
     TOOL_P -. tool run_fusion .-> P
     P --> GUARD[helpers/guardrails.py<br/>validate_plan hard block<br/>capability_illegal / step cap 10<br/>PlanSchema]
@@ -41,7 +41,7 @@ flowchart TB
     TA[task_agent<br/>agents/task_agents.py:34<br/>VRAM_SEMAPHORE 2 + to_thread<br/>_resolve via image_pipeline.resolve_asset<br/>sanitize asset_/file_ → rglob ingest<br/>NO resampling before model]
     TA --> RESOLVE[services/image_pipeline.py<br/>resolve_asset + content_hash<br/>gateway/upload ↔ storage/ingest]
     RESOLVE --> DISK
-    TA --> SHIM{{model_adapter.py:20 call_model<br/>MODEL_MAP shim pref<br/>probe inference/ask_geochat<br/>MODEL_NOT_LINKED permanent<br/>MODEL_INFERENCE_ERROR transient}}
+    TA --> SHIM["model_adapter.py:20 call_model<br/>MODEL_MAP shim pref<br/>probe inference/ask_geochat<br/>MODEL_NOT_LINKED permanent<br/>MODEL_INFERENCE_ERROR transient}}
     SHIM --> S1[model1_shim<br/>load_model 4bit → ask_geochat<br/>models/model1/run_inference.py]
     SHIM --> S2[model2_shim<br/>load_and_convert_s2 2-98% → build_groundingdino<br/>models/model2/visualize + vendor config/train]
     SHIM --> S3[model3_shim<br/>compute_indices NDVI/NDWI + classify_deltas<br/>fusion_change_confidence → Vicuna<br/>models/model3/visualize_index_hybrid]
@@ -59,7 +59,7 @@ flowchart TB
     PP -->|_needs_retry conf<0.6 retry≤3| TA
     PP -->|final_result null + error| EH
     PP -->|ok| RC[response_composer<br/>agents/response_composer.py<br/>call_qwen_composer_stream Ollama 2048 tok<br/>to_thread + emit thinking_delta/answer_delta]
-    RC --> LLM_C{{Ollama qwen3.5:9b stream<br/>core/llm_client.py ollama.chat stream True}}
+    RC --> LLM_C["Ollama qwen3.5:9b stream<br/>core/llm_client.py ollama.chat stream True}}
     LLM_C --> CHART[helpers/chart_spec.py<br/>validate_chart_spec → ```chart]
     RC --> MEM_WRITE[services/conversation.py<br/>save_history fire-and-forget add_turn<br/>→ rag_store add_turn → Chroma + SQLite<br/>→ entity_registry extract_entities]
     MEM_WRITE --> CHROMA[(Chroma 8001 chroma_data<br/>satiq_conversation)]
@@ -109,7 +109,7 @@ USER (query + image files)
   │           ├─► Gateway upload.ts:37 — createReadStream duplex:half 60s, randomUUID+.jp2, forward Authorization + w/h/crs/gsd, no base64
   │           │     └─► Orchestrator POST /api/v1/ingest main.py:981 — ingest_file() → EXIF GPS + validate_geotiff (rasterio→PIL) + thumbnail → orchestrator/storage/ingest/<stem>.tif + DISK
   │           └─► Gateway query.ts:23 inject Authorization → agentic-analysis.provider:40 (unified getReader/AsyncIterable, dedup event:ts:payload, maxAttempts 32, _authHeader)
-  │                 └─► ORCH POST /api/v1/task main.py:743 — _normalize_assets (allow_synthetic false → 400), CRS mismatch 400, pixel 100Mpix 413, queue_gate.acquire 429, EXECUTIONS[{id}] + Redis setex 3600 (satiq:exec:{id}), Last-Event-ID replay, BackgroundTasks run_pipeline
+  │                 └─► ORCH POST /api/v1/task main.py:743 — _normalize_assets (allow_synthetic false → 400), CRS mismatch 400, pixel 100Mpix 413, queue_gate.acquire 429, EXECUTIONS[(id)] + Redis setex 3600 (satiq-exec-id), Last-Event-ID replay, BackgroundTasks run_pipeline
   │
   └─► RUN_PIPELINE main.py:155 — _broadcast query_started/input_done/composer_started (pre-creates assistant message so answer_delta not dropped), pipeline.ainvoke(state)
 
@@ -145,7 +145,7 @@ USER (query + image files)
         │
         └─► error_handler → END
 
-        SSE path: orchestrator GET /api/v1/task/{id}/stream (StreamingResponse + Last-Event-ID id: replay from Redis) → gateway agentic stream → Frontend StreamMarkdown (parse ?bbox= / alt JSON, else null, ApexCharts), MapLibre bbox overlay, ExecutionTrace panel
+        SSE path: orchestrator GET /api/v1/task/(id)/stream (StreamingResponse + Last-Event-ID id: replay from Redis) → gateway agentic stream → Frontend StreamMarkdown (parse ?bbox= / alt JSON, else null, ApexCharts), MapLibre bbox overlay, ExecutionTrace panel
 
         Side systems (always available, no mock):
           checkpoint: compute_request_key sorted-hash (core/checkpoint) • timeouts: TOTAL 45s, per-node tight, check_deadline_or_raise • circuit_breaker: qwen_circuit (R/P/RC) • queue_gate: semaphore 429 + dlq • metrics + structured_logging • tiling: 512+64 Window via rasterio or passthrough • spectral: NDVI/NDWI pure numpy (dummy→raise) • geocoder: BUILTIN_GAZETTEER → WGS84 bbox • query_analyzer • embedding: bge pad 0 • transcription: Groq whisper no mock text
@@ -176,8 +176,8 @@ flowchart TB
     FE_CLIENT --> GW_U[gateway upload.ts:37<br/>createReadStream duplex:half 60s<br/>forward w/h/crs/gsd]
     GW_U --> INGEST[orchestrator POST /api/v1/ingest<br/>api/main.py:981 ingest_file<br/>EXIF GPS + validate_geotiff<br/>thumbnail → orchestrator/storage/ingest/<stem>.tif]
     INGEST --> DISK[(Disk orchestrator/storage/ingest)]
-    GW_Q --> ORCH_POST[ORCH POST /api/v1/task<br/>main.py:743 _normalize_assets<br/>CRS mismatch 400 • 100Mpix 413<br/>queue_gate.acquire 429<br/>EXECUTIONS[{id}] + Redis setex 3600]
-    ORCH_POST --> REDIS[(Redis satiq:exec:{id}<br/>_persist_exec + Last-Event-ID)]
+    GW_Q --> ORCH_POST[ORCH POST /api/v1/task<br/>main.py:743 _normalize_assets<br/>CRS mismatch 400 • 100Mpix 413<br/>queue_gate.acquire 429<br/>EXECUTIONS[(id)] + Redis setex 3600]
+    ORCH_POST --> REDIS[(Redis satiq-exec-id<br/>_persist_exec + Last-Event-ID)]
     ORCH_POST --> RUN[run_pipeline main.py:155<br/>_broadcast query_started/input_done/composer_started<br/>pipeline.ainvoke(state)]
 
     RUN --> IV[input_validator<br/>agents/input_validator.py:23<br/>request_key + deadline 45s<br/>len 16-4000 • jailbreak via guardrails/check_prompt_injection<br/>CRS hard gate _crs_mismatch • GSD>0 • pixel cap w*h>100Mpix<br/>_corrupt/malformed_geotiff]
@@ -185,14 +185,14 @@ flowchart TB
     IV -->|pass pending_llm| CR[coreference_resolver<br/>agents/coreference_resolver.py<br/>entity_registry extract_entities<br/>conversation augment_state_with_history]
 
     CR --> R[router<br/>agents/router_agent.py:11<br/>query_analyzer detect_temporal/spatial/comparison<br/>augment_state_with_history<br/>to_thread call_qwen_router]
-    R --> LLM_R{{Ollama qwen3.5:9b<br/>core/llm_client.py:500 call_qwen_router<br/>ollama.chat tools=ROUTER_TOOLS 4 tool_choice auto<br/>prompt single-word task_type}}
+    R --> LLM_R["Ollama qwen3.5:9b<br/>core/llm_client.py:500 call_qwen_router<br/>ollama.chat tools=ROUTER_TOOLS 4 tool_choice auto<br/>prompt single-word task_type}}
     LLM_R --> TOOL_R[/ROUTER_TOOLS<br/>helpers/tool_schemas.py:13<br/>run_vqa / run_grounding / run_change_vqa / run_fusion/]
     TOOL_R -. tool_call run_grounding .-> R
     R --> REG1[registry/capability_registry.py<br/>validate_legality + warn change_vqa<2 assets]
     R --> TRACE_R[(add_trace router ok<br/>emit thinking_delta)]
 
     R --> P[planner<br/>agents/planner_agent.py:9<br/>registry_prompt_fragment<br/>load_history_hybrid n=3 Chroma+SQLite<br/>rag_store.retrieve top_k 3<br/>entity_registry<br/>to_thread call_qwen_planner]
-    P --> LLM_P{{Ollama qwen3.5:9b<br/>core/llm_client.py:560 call_qwen_planner<br/>ollama.chat tools=REGISTERED_TOOLS 10<br/>JSON GoalPlan}}
+    P --> LLM_P["Ollama qwen3.5:9b<br/>core/llm_client.py:560 call_qwen_planner<br/>ollama.chat tools=REGISTERED_TOOLS 10<br/>JSON GoalPlan}}
     LLM_P --> TOOL_P[/REGISTERED_TOOLS<br/>MODEL 4 + DETERMINISTIC 6<br/>compute_spectral_indices fail-closed<br/>geocode_region / crop_bbox / retrieve_history/]
     TOOL_P -. tool run_fusion .-> P
     P --> GUARD[helpers/guardrails.py<br/>validate_plan hard block<br/>capability_illegal / step cap 10<br/>PlanSchema]
@@ -207,7 +207,7 @@ flowchart TB
     TA[task_agent<br/>agents/task_agents.py:34<br/>VRAM_SEMAPHORE 2 + to_thread<br/>_resolve via image_pipeline.resolve_asset<br/>sanitize asset_/file_ → rglob ingest<br/>NO resampling before model]
     TA --> RESOLVE[services/image_pipeline.py<br/>resolve_asset + content_hash<br/>gateway/upload ↔ storage/ingest]
     RESOLVE --> DISK
-    TA --> SHIM{{model_adapter.py:20 call_model<br/>MODEL_MAP shim pref<br/>probe inference/ask_geochat<br/>MODEL_NOT_LINKED permanent<br/>MODEL_INFERENCE_ERROR transient}}
+    TA --> SHIM["model_adapter.py:20 call_model<br/>MODEL_MAP shim pref<br/>probe inference/ask_geochat<br/>MODEL_NOT_LINKED permanent<br/>MODEL_INFERENCE_ERROR transient}}
     SHIM --> S1[model1_shim<br/>load_model 4bit → ask_geochat<br/>models/model1/run_inference.py]
     SHIM --> S2[model2_shim<br/>load_and_convert_s2 2-98% → build_groundingdino<br/>models/model2/visualize + vendor config/train]
     SHIM --> S3[model3_shim<br/>compute_indices NDVI/NDWI + classify_deltas<br/>fusion_change_confidence → Vicuna<br/>models/model3/visualize_index_hybrid]
@@ -225,7 +225,7 @@ flowchart TB
     PP -->|_needs_retry conf<0.6 retry≤3| TA
     PP -->|final_result null + error| EH
     PP -->|ok| RC[response_composer<br/>agents/response_composer.py<br/>call_qwen_composer_stream Ollama 2048 tok<br/>to_thread + emit thinking_delta/answer_delta]
-    RC --> LLM_C{{Ollama qwen3.5:9b stream<br/>core/llm_client.py ollama.chat stream True}}
+    RC --> LLM_C["Ollama qwen3.5:9b stream<br/>core/llm_client.py ollama.chat stream True}}
     LLM_C --> CHART[helpers/chart_spec.py<br/>validate_chart_spec → ```chart]
     RC --> MEM_WRITE[services/conversation.py<br/>save_history fire-and-forget add_turn<br/>→ rag_store add_turn → Chroma + SQLite<br/>→ entity_registry extract_entities]
     MEM_WRITE --> CHROMA[(Chroma 8001 chroma_data<br/>satiq_conversation)]
@@ -275,7 +275,7 @@ USER (query + image files)
   │           ├─► Gateway upload.ts:37 — createReadStream duplex:half 60s, randomUUID+.jp2, forward Authorization + w/h/crs/gsd, no base64
   │           │     └─► Orchestrator POST /api/v1/ingest main.py:981 — ingest_file() → EXIF GPS + validate_geotiff (rasterio→PIL) + thumbnail → orchestrator/storage/ingest/<stem>.tif + DISK
   │           └─► Gateway query.ts:23 inject Authorization → agentic-analysis.provider:40 (unified getReader/AsyncIterable, dedup event:ts:payload, maxAttempts 32, _authHeader)
-  │                 └─► ORCH POST /api/v1/task main.py:743 — _normalize_assets (allow_synthetic false → 400), CRS mismatch 400, pixel 100Mpix 413, queue_gate.acquire 429, EXECUTIONS[{id}] + Redis setex 3600 (satiq:exec:{id}), Last-Event-ID replay, BackgroundTasks run_pipeline
+  │                 └─► ORCH POST /api/v1/task main.py:743 — _normalize_assets (allow_synthetic false → 400), CRS mismatch 400, pixel 100Mpix 413, queue_gate.acquire 429, EXECUTIONS[(id)] + Redis setex 3600 (satiq-exec-id), Last-Event-ID replay, BackgroundTasks run_pipeline
   │
   └─► RUN_PIPELINE main.py:155 — _broadcast query_started/input_done/composer_started (pre-creates assistant message so answer_delta not dropped), pipeline.ainvoke(state)
 
@@ -311,7 +311,7 @@ USER (query + image files)
         │
         └─► error_handler → END
 
-        SSE path: orchestrator GET /api/v1/task/{id}/stream (StreamingResponse + Last-Event-ID id: replay from Redis) → gateway agentic stream → Frontend StreamMarkdown (parse ?bbox= / alt JSON, else null, ApexCharts), MapLibre bbox overlay, ExecutionTrace panel
+        SSE path: orchestrator GET /api/v1/task/(id)/stream (StreamingResponse + Last-Event-ID id: replay from Redis) → gateway agentic stream → Frontend StreamMarkdown (parse ?bbox= / alt JSON, else null, ApexCharts), MapLibre bbox overlay, ExecutionTrace panel
 
         Side systems (always available, no mock):
           checkpoint: compute_request_key sorted-hash (core/checkpoint) • timeouts: TOTAL 45s, per-node tight, check_deadline_or_raise • circuit_breaker: qwen_circuit (R/P/RC) • queue_gate: semaphore 429 + dlq • metrics + structured_logging • tiling: 512+64 Window via rasterio or passthrough • spectral: NDVI/NDWI pure numpy (dummy→raise) • geocoder: BUILTIN_GAZETTEER → WGS84 bbox • query_analyzer • embedding: bge pad 0 • transcription: Groq whisper no mock text
@@ -434,7 +434,7 @@ def try_workflow_png(path: str = "orchestrator/graph/workflow_detailed.png"):
         y_top = 140
         block(30, y_top, 860, 132, "USER  +  FRONTEND  5173", "Composer.tsx:114  100 MB createObjectURL  •  FormData(image)+query+chips\nanalysisClient.ts:57  fetch POST /api/query  SSE  abort-safe, Finally only if !failed", C["fe"])
         block(920, y_top, 860, 132, "GATEWAY  4000  Express", "routes/upload.ts:37  createReadStream duplex:half 60 s  randomUUID+.jp2  forward w/h/crs/gsd\nagentic dedup event:ts:payload  maxAttempts 32  keepAlive 70 s  rateLimiter userId||ip", C["gw"])
-        block(1810, y_top, 960, 132, "ORCH  POST /api/v1/task  (api/main.py:743)", "_normalize_assets  CRS 400  •  100 Mpix 413  •  queue_gate 429\nEXECUTIONS[{id}] + Redis setex 3600  +  Last-Event-ID id: replay  •  BackgroundTasks run_pipeline", C["or"])
+        block(1810, y_top, 960, 132, "ORCH  POST /api/v1/task  (api/main.py:743)", "_normalize_assets  CRS 400  •  100 Mpix 413  •  queue_gate 429\nEXECUTIONS[(id)] + Redis setex 3600  +  Last-Event-ID id: replay  •  BackgroundTasks run_pipeline", C["or"])
         # top arrows
         def h_arrow(x1, y1, x2, y2):
             draw.line([x1, y1, x2, y2], fill="white", width=3)
@@ -556,7 +556,7 @@ def try_workflow_png(path: str = "orchestrator/graph/workflow_detailed.png"):
 
         # Bottom SSE block — spans width, connected from response_composer
         by = cur_y + 32
-        block(80, by, W-160, 118, "RESPONSE  SSE  →  Gateway agentic dedup 32  →  Frontend StreamMarkdown (?bbox= parse, ApexCharts)  +  MapLibre bbox overlay  +  ExecutionTrace", "response_composer  ollama stream 2048  →  broadcast answer_delta + chart + bbox table + /api/assets/{name} 768 px (not base64)  →  gateway upload  →  frontend\npersist:  MinIO rs-outputs  •  audit.db execution_traces  •  Redis satiq:exec:{id}  •  Chroma/SQLite  •  metrics + structured_logging", "#0F172A")
+        block(80, by, W-160, 118, "RESPONSE  SSE  →  Gateway agentic dedup 32  →  Frontend StreamMarkdown (?bbox= parse, ApexCharts)  +  MapLibre bbox overlay  +  ExecutionTrace", "response_composer  ollama stream 2048  →  broadcast answer_delta + chart + bbox table + /api/assets/{name} 768 px (not base64)  →  gateway upload  →  frontend\npersist:  MinIO rs-outputs  •  audit.db execution_traces  •  Redis satiq-exec-id  •  Chroma/SQLite  •  metrics + structured_logging", "#0F172A")
         # arrow from last pipeline node (error_handler is separate, response_composer is node 7)
         # response_composer was at idx 6, its center is at cur_y - left_h - GAP ...
         # draw vertical from response_composer (node 7) down to bottom block

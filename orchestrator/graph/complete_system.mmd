@@ -105,7 +105,7 @@ flowchart TB
     subgraph Cache["⚡ Cache + Resilience"]
         Q1[query_cache.py<br/>TTLCache 3600/1024]
         Q2[metrics p50/p95/p99<br/>+ vram peak/queue]
-        REDIS[(Redis<br/>satiq:exec:{id} setex 3600<br/>Last-Event-ID + queue_position)]
+        REDIS[(Redis<br/>satiq-exec-id setex 3600<br/>Last-Event-ID + queue_position)]
         CKPT[checkpoint<br/>sorted-hash request_key]
         TO[timeouts<br/>TOTAL 45s wait_for • 8 nodes tight]
         CB[circuit_breaker<br/>qwen_circuit]
@@ -143,7 +143,7 @@ flowchart TB
 
     %% ───────── CROSS LINKS ─────────
     Frontend -->|POST /api/query<br/>SSE stream| Gateway
-    Gateway -->|POST /api/v1/task<br/>GET /api/v1/task/{id}/stream<br/>Last-Event-ID| Orchestrator
+    Gateway -->|POST /api/v1/task<br/>GET /api/v1/task/(id)/stream<br/>Last-Event-ID| Orchestrator
     Gateway -->|POST /api/v1/ingest<br/>multipart| GEO
     R <-->|tools| Tools
     P <-->|tools| Tools

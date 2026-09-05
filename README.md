@@ -64,34 +64,44 @@ python scripts/download_weights.py --check     # verify MODEL_NOT_LINKED clears
 
 ```mermaid
 flowchart TB
-    U[User query + images] --> FE[Frontend 5173<br/>Composer 100MB createObjectURL<br/>StreamMarkdown ?bbox=]
-    FE --> GW[Gateway 4000<br/>upload duplex:half 60s + query agentic dedup 32]
-    GW --> ING[POST /api/v1/ingest<br/>EXIF GPS + validate_geotiff]
-    GW --> TASK[POST /api/v1/task<br/>_normalize_assets • CRS 400 • 100Mpix 413 • queue 429<br/>Redis satiq:exec:{id} 3600 + Last-Event-ID]
-    TASK --> IV[input_validator<br/>request_key sorted-hash • deadline 45s<br/>len 16-4000 • jailbreak guardrails<br/>CRS hard gate • GSD>0 • 100Mpix]
+    U[User query + images] --> FE[Frontend 5173<br/>Composer 100MB createObjectURL<br/>StreamMarkdown bbox]
+    FE --> GW[Gateway 4000<br/>upload duplex half 60s + query agentic dedup 32]
+    GW --> ING[POST api v1 ingest<br/>EXIF GPS + validate_geotiff]
+    GW --> TASK[POST api v1 task<br/>normalize_assets CRS 400 100Mpix 413 queue 429<br/>Redis satiq-exec 3600 + Last-Event-ID]
+
+    TASK --> IV[input_validator<br/>request_key sorted-hash deadline 45s<br/>len 16-4000 jailbreak guardrails<br/>CRS hard gate GSD greater 0 100Mpix]
     IV -->|fail| EH[error_handler]
-    IV -->|pass| CR[coreference_resolver<br/>entity_registry • history]
+    IV -->|pass| CR[coreference_resolver<br/>entity_registry plus history]
+
     CR --> R[router<br/>Ollama ROUTER_TOOLS 4<br/>tool_choice auto via to_thread]
-    R --> P[planner<br/>Ollama REGISTERED_TOOLS 10 + RAG<br/>PlanSchema • guardrails step cap 10]
-    P -->|skip greeting/chitchat/help| RC[response_composer<br/>Ollama stream 2048]
-    P -->|geospatial| TA[task_agent<br/>VRAM 2 • to_thread → shim]
-    TA --> S1[model1 GeoChat-7B<br/>ask_geochat]
-    TA --> S2[model2 GroundingDINO<br/>2-98% percentile → bbox]
-    TA --> S3[model3 Prithvi+Vicuna<br/>indices + fusion]
-    TA --> S4[model4 CROMA 12+2<br/>Model4Engine]
-    TA --> PP[post_processing<br/>conf 0.6 • bbox [0,1] • chart real only]
+    R --> P[planner<br/>Ollama REGISTERED_TOOLS 10 plus RAG<br/>PlanSchema guardrails step cap 10]
+
+    P -->|skip greeting| RC[response_composer<br/>Ollama stream 2048]
+    P -->|geospatial| TA[task_agent<br/>VRAM 2 to_thread to shim]
+
+    TA --> S1[model1 GeoChat-7B ask_geochat]
+    TA --> S2[model2 GroundingDINO 2-98 percentile to bbox]
+    TA --> S3[model3 Prithvi Vicuna indices plus fusion]
+    TA --> S4[model4 CROMA 12 plus 2 Model4Engine]
+
+    S1 --> PP[post_processing<br/>conf 0.6 bbox 0-1 chart real only]
+    S2 --> PP
+    S3 --> PP
+    S4 --> PP
+
     PP --> RC
-    PP -->|retry ×3| TA
-    RC --> SSE[SSE answer_delta → Gateway → Frontend<br/>+ /api/assets bbox overlay]
-    EH --> END
-    RC --> END
+    PP -->|retry x3| TA
+
+    RC --> SSE[SSE answer_delta to Gateway to Frontend<br/>plus api assets bbox overlay]
+    EH --> ENDNODE([End])
+    RC --> ENDNODE
 ```
 
 Live, code-accurate diagrams: `orchestrator/graph/complete_system.mmd` (layered) + `orchestrator/graph/workflow_detailed.mmd` (wired workflow) + PNGs `complete_system.png 2400×3300` / `workflow_detailed.png 2400×~2450` via `python orchestrator/graph/workflow_detailed.py` (Pillow). Premium HTML: `docs/workflow_premium.html`.
 
 ### 2.1 Input Handler — Deterministic Gate (no LLM cost)
 File `agents/input_validator.py:23` + `helpers/guardrails.py`, `services/image_ingest.py`
-- Length 16–4000, empty/greeting/out_of_scope via LLM (no `4x+3y` literals), jailbreak `check_prompt_injection`
+- Length 16–4000, regex/lexical matching for empty/greeting/out_of_scope inputs to maintain **zero LLM cost**, jailbreak `check_prompt_injection`
 - CRS hard gate `_crs_mismatch` (permanent), `GSD>0`, `w*h>100Mpix` guard, `_corrupt/malformed_geotiff`
 - `request_key` sorted-hash + `deadline_ms = now+45s`, `node_latencies`, `retry_policy`, `circuit_breaker_state`
 - `POST /api/v1/ingest` ingest: `rasterio→PIL` validate, EXIF GPS, thumbnail, `orchestrator/storage/ingest/<stem>.tif` (no resampling before model)
@@ -112,10 +122,8 @@ File `agents/task_agents.py:34` + `capabilities/model_adapter.py:20` + `services
 
 ### 2.4 Response Composer — Streaming
 File `agents/response_composer.py` + `core/llm_client.py` `call_qwen_composer_stream` (Ollama `stream True`, 2048 tok), `helpers/chart_spec.py`.
-- Emits `thinking_delta/answer_delta`, `chart` ```chart, `bbox` table + normalized `?bbox=x1,y1,x2,y2` on `/api/assets/{name}` (768px, not base64) → `StreamMarkdown` MapLibre overlay (no keyword heuristic)
+- Emits `thinking_delta/answer_delta`, `chart` code block components, `bbox` data tables, and normalized `?bbox=x1,y1,x2,y2` paths on `/api/assets/{name}` (768px, not base64) → maps directly to `StreamMarkdown` MapLibre overlays
 - `save_history` fire-and-forget → `rag_store Chroma 8001/chroma_data` + `SQLite memory.db` + `audit.db execution_traces` + `MinIO rs-outputs`
-
----
 
 ## 3. The 4 Shims — Real Weights, Fail-Closed
 
@@ -212,7 +220,7 @@ satiq/
 - **Disk cleanup** (`services/image_ingest.py:246` + `gateway/upload`): `mtime>3600` sweep of `orchestrator/storage/ingest/*` + `gateway/upload/*` + FFmpeg `/tmp/crop_*.png`.
 - **CUDA flush** (`agents/task_agents.py:22`): `finally: torch.cuda.empty_cache(); gc.collect()` after each shim.
 - **Bbox URL** (`agents/task_agents.py:70` + `api/main.py:233`): `?bbox=x1,y1,x2,y2&crs=EPSG:4326` on `/api/assets` → `StreamMarkdown` `bbox://` without keyword heuristic (was `water→0.18` removed).
-- **Redis TTL** (`api/main.py:105`): `satiq:exec:{id} setex 3600` + `Last-Event-ID id:` replay.
+- **Redis TTL** (`api/main.py:105`): `satiq-exec-id setex 3600` + `Last-Event-ID id:` replay.
 
 ---
 

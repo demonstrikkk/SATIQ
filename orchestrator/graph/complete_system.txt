@@ -26,7 +26,7 @@ COMPLETE SATIQ SYSTEM — 8-NODE ORCHESTRATOR + TOOLS + MEMORY + STORAGE + CACHE
   conversation.py load_history_hybrid (Chroma vector + SQLite recency) + save_history add_turn fire-and-forget • rag_store.py Chroma satiq_conversation 8001 + chroma_data volume • entity_registry extract_entities alias→bbox • memory.db SQLite turn_history
 
  CACHE + RESILIENCE
-  query_cache TTLCache 3600/1024 • TTL tile/encoder • Redis satiq:exec:{id} setex 3600 + Last-Event-ID id: replay • checkpoint sorted-hash request_key • timeouts TOTAL 45s • circuit_breaker qwen_circuit • queue_gate semaphore 429 • dlq
+  query_cache TTLCache 3600/1024 • TTL tile/encoder • Redis satiq-exec-id setex 3600 + Last-Event-ID id: replay • checkpoint sorted-hash request_key • timeouts TOTAL 45s • circuit_breaker qwen_circuit • queue_gate semaphore 429 • dlq
 
  STORAGE — MinIO + Disk fallback
   MinIO 9000 rs-outputs • Disk orchestrator/storage/ingest/<stem>.tif + audit.db + outputs/ • ingest_file → EXIF GPS + validate_geotiff + thumbnail • geojson_export/report_generator/tiling 512+64 Window

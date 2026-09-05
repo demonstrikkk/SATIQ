@@ -22,7 +22,7 @@ flowchart TD
     PP -->|ok| RC
     RC --> END([END])
     ERR[error_handler<br/>cross-cutting terminal<br/>any node → ERR → response_composer] --> END
-    TA -. image_path via image_pipeline.resolve_asset + reproject warp .-> SHIMS{{"model1: GeoChat-7B<br/>model2: GroundingDINO Swin-T<br/>model3: Prithvi+Vicuna<br/>model4: CROMA"}}
+    TA -. image_path via image_pipeline.resolve_asset + reproject warp .-> SHIMS[""model1: GeoChat-7B<br/>model2: GroundingDINO Swin-T<br/>model3: Prithvi+Vicuna<br/>model4: CROMA"}}
     SHIMS -. raw image + query .-> TA
     P -. RAG retrieve_for_planner .-> MEM[(Memory 4-tier<br/>working + episodic hybrid 0.7/0.3 + semantic)]
     TA -. metrics p50/p99 + vram .-> MON[(metrics)]

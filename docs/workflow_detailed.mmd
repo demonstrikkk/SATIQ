@@ -7,8 +7,8 @@ flowchart TB
     FE_CLIENT --> GW_U[gateway upload.ts:37<br/>createReadStream duplex:half 60s<br/>forward w/h/crs/gsd]
     GW_U --> INGEST[orchestrator POST /api/v1/ingest<br/>api/main.py:981 ingest_file<br/>EXIF GPS + validate_geotiff<br/>thumbnail → orchestrator/storage/ingest/<stem>.tif]
     INGEST --> DISK[(Disk orchestrator/storage/ingest)]
-    GW_Q --> ORCH_POST[ORCH POST /api/v1/task<br/>main.py:743 _normalize_assets<br/>CRS mismatch 400 • 100Mpix 413<br/>queue_gate.acquire 429<br/>EXECUTIONS[{id}] + Redis setex 3600]
-    ORCH_POST --> REDIS[(Redis satiq:exec:{id}<br/>_persist_exec + Last-Event-ID)]
+    GW_Q --> ORCH_POST[ORCH POST /api/v1/task<br/>main.py:743 _normalize_assets<br/>CRS mismatch 400 • 100Mpix 413<br/>queue_gate.acquire 429<br/>EXECUTIONS[(id)] + Redis setex 3600]
+    ORCH_POST --> REDIS[(Redis satiq-exec-id<br/>_persist_exec + Last-Event-ID)]
     ORCH_POST --> RUN[run_pipeline main.py:155<br/>_broadcast query_started/input_done/composer_started<br/>pipeline.ainvoke(state)]
 
     RUN --> IV[input_validator<br/>agents/input_validator.py:23<br/>request_key + deadline 45s<br/>len 16-4000 • jailbreak via guardrails/check_prompt_injection<br/>CRS hard gate _crs_mismatch • GSD>0 • pixel cap w*h>100Mpix<br/>_corrupt/malformed_geotiff]
@@ -16,14 +16,14 @@ flowchart TB
     IV -->|pass pending_llm| CR[coreference_resolver<br/>agents/coreference_resolver.py<br/>entity_registry extract_entities<br/>conversation augment_state_with_history]
 
     CR --> R[router<br/>agents/router_agent.py:11<br/>query_analyzer detect_temporal/spatial/comparison<br/>augment_state_with_history<br/>to_thread call_qwen_router]
-    R --> LLM_R{{Ollama qwen3.5:9b<br/>core/llm_client.py:500 call_qwen_router<br/>ollama.chat tools=ROUTER_TOOLS 4 tool_choice auto<br/>prompt single-word task_type}}
+    R --> LLM_R["Ollama qwen3.5:9b<br/>core/llm_client.py:500 call_qwen_router<br/>ollama.chat tools=ROUTER_TOOLS 4 tool_choice auto<br/>prompt single-word task_type"]
     LLM_R --> TOOL_R[/ROUTER_TOOLS<br/>helpers/tool_schemas.py:13<br/>run_vqa / run_grounding / run_change_vqa / run_fusion/]
     TOOL_R -. tool_call run_grounding .-> R
     R --> REG1[registry/capability_registry.py<br/>validate_legality + warn change_vqa<2 assets]
     R --> TRACE_R[(add_trace router ok<br/>emit thinking_delta)]
 
     R --> P[planner<br/>agents/planner_agent.py:9<br/>registry_prompt_fragment<br/>load_history_hybrid n=3 Chroma+SQLite<br/>rag_store.retrieve top_k 3<br/>entity_registry<br/>to_thread call_qwen_planner]
-    P --> LLM_P{{Ollama qwen3.5:9b<br/>core/llm_client.py:560 call_qwen_planner<br/>ollama.chat tools=REGISTERED_TOOLS 10<br/>JSON GoalPlan}}
+    P --> LLM_P["Ollama qwen3.5:9b<br/>core/llm_client.py:560 call_qwen_planner<br/>ollama.chat tools=REGISTERED_TOOLS 10<br/>JSON GoalPlan"]
     LLM_P --> TOOL_P[/REGISTERED_TOOLS<br/>MODEL 4 + DETERMINISTIC 6<br/>compute_spectral_indices fail-closed<br/>geocode_region / crop_bbox / retrieve_history/]
     TOOL_P -. tool run_fusion .-> P
     P --> GUARD[helpers/guardrails.py<br/>validate_plan hard block<br/>capability_illegal / step cap 10<br/>PlanSchema]
@@ -38,7 +38,7 @@ flowchart TB
     TA[task_agent<br/>agents/task_agents.py:34<br/>VRAM_SEMAPHORE 2 + to_thread<br/>_resolve via image_pipeline.resolve_asset<br/>sanitize asset_/file_ → rglob ingest<br/>NO resampling before model]
     TA --> RESOLVE[services/image_pipeline.py<br/>resolve_asset + content_hash<br/>gateway/upload ↔ storage/ingest]
     RESOLVE --> DISK
-    TA --> SHIM{{model_adapter.py:20 call_model<br/>MODEL_MAP shim pref<br/>probe inference/ask_geochat<br/>MODEL_NOT_LINKED permanent<br/>MODEL_INFERENCE_ERROR transient}}
+    TA --> SHIM["model_adapter.py:20 call_model<br/>MODEL_MAP shim pref<br/>probe inference/ask_geochat<br/>MODEL_NOT_LINKED permanent<br/>MODEL_INFERENCE_ERROR transient"]
     SHIM --> S1[model1_shim<br/>load_model 4bit → ask_geochat<br/>models/model1/run_inference.py]
     SHIM --> S2[model2_shim<br/>load_and_convert_s2 2-98% → build_groundingdino<br/>models/model2/visualize + vendor config/train]
     SHIM --> S3[model3_shim<br/>compute_indices NDVI/NDWI + classify_deltas<br/>fusion_change_confidence → Vicuna<br/>models/model3/visualize_index_hybrid]
@@ -56,7 +56,7 @@ flowchart TB
     PP -->|_needs_retry conf<0.6 retry≤3| TA
     PP -->|final_result null + error| EH
     PP -->|ok| RC[response_composer<br/>agents/response_composer.py<br/>call_qwen_composer_stream Ollama 2048 tok<br/>to_thread + emit thinking_delta/answer_delta]
-    RC --> LLM_C{{Ollama qwen3.5:9b stream<br/>core/llm_client.py ollama.chat stream True}}
+    RC --> LLM_C["Ollama qwen3.5:9b stream<br/>core/llm_client.py ollama.chat stream True"]
     LLM_C --> CHART[helpers/chart_spec.py<br/>validate_chart_spec → ```chart]
     RC --> MEM_WRITE[services/conversation.py<br/>save_history fire-and-forget add_turn<br/>→ rag_store add_turn → Chroma + SQLite<br/>→ entity_registry extract_entities]
     MEM_WRITE --> CHROMA[(Chroma 8001 chroma_data<br/>satiq_conversation)]

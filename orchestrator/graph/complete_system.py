@@ -113,7 +113,7 @@ flowchart TB
     subgraph Cache["⚡ Cache + Resilience"]
         Q1[query_cache.py<br/>TTLCache 3600/1024]
         Q2[metrics p50/p95/p99<br/>+ vram peak/queue]
-        REDIS[(Redis<br/>satiq:exec:{id} setex 3600<br/>Last-Event-ID + queue_position)]
+        REDIS[(Redis<br/>satiq-exec-id setex 3600<br/>Last-Event-ID + queue_position)]
         CKPT[checkpoint<br/>sorted-hash request_key]
         TO[timeouts<br/>TOTAL 45s wait_for • 8 nodes tight]
         CB[circuit_breaker<br/>qwen_circuit]
@@ -151,7 +151,7 @@ flowchart TB
 
     %% ───────── CROSS LINKS ─────────
     Frontend -->|POST /api/query<br/>SSE stream| Gateway
-    Gateway -->|POST /api/v1/task<br/>GET /api/v1/task/{id}/stream<br/>Last-Event-ID| Orchestrator
+    Gateway -->|POST /api/v1/task<br/>GET /api/v1/task/(id)/stream<br/>Last-Event-ID| Orchestrator
     Gateway -->|POST /api/v1/ingest<br/>multipart| GEO
     R <-->|tools| Tools
     P <-->|tools| Tools
@@ -199,7 +199,7 @@ COMPLETE SATIQ SYSTEM — 8-NODE ORCHESTRATOR + TOOLS + MEMORY + STORAGE + CACHE
   conversation.py load_history_hybrid (Chroma vector + SQLite recency) + save_history add_turn fire-and-forget • rag_store.py Chroma satiq_conversation 8001 + chroma_data volume • entity_registry extract_entities alias→bbox • memory.db SQLite turn_history
 
  CACHE + RESILIENCE
-  query_cache TTLCache 3600/1024 • TTL tile/encoder • Redis satiq:exec:{id} setex 3600 + Last-Event-ID id: replay • checkpoint sorted-hash request_key • timeouts TOTAL 45s • circuit_breaker qwen_circuit • queue_gate semaphore 429 • dlq
+  query_cache TTLCache 3600/1024 • TTL tile/encoder • Redis satiq-exec-id setex 3600 + Last-Event-ID id: replay • checkpoint sorted-hash request_key • timeouts TOTAL 45s • circuit_breaker qwen_circuit • queue_gate semaphore 429 • dlq
 
  STORAGE — MinIO + Disk fallback
   MinIO 9000 rs-outputs • Disk orchestrator/storage/ingest/<stem>.tif + audit.db + outputs/ • ingest_file → EXIF GPS + validate_geotiff + thumbnail • geojson_export/report_generator/tiling 512+64 Window
@@ -293,7 +293,7 @@ def try_complete_png(path: str = "orchestrator/graph/complete_system.png"):
 
         y3 = y2 + 335
         block(40, y3, 760, 335, "MEMORY  Hybrid RAG", "conversation.load_history_hybrid n=3\n rag_store Chroma satiq_conversation 8001 chroma_data\n entity_registry alias→bbox\n memory.db SQLite turn_history\n save_history add_turn fire-and-forget", COLORS_P["Memory"])
-        block(820, y3, 740, 335, "CACHE + RESILIENCE", "query_cache TTLCache 3600/1024\n Redis satiq:exec:{id} setex 3600 + Last-Event-ID\n checkpoint sorted-hash request_key\n timeouts TOTAL 45s • circuit_breaker qwen_circuit\n queue_gate semaphore 429 • dlq", COLORS_P["Cache"])
+        block(820, y3, 740, 335, "CACHE + RESILIENCE", "query_cache TTLCache 3600/1024\n Redis satiq-exec-id setex 3600 + Last-Event-ID\n checkpoint sorted-hash request_key\n timeouts TOTAL 45s • circuit_breaker qwen_circuit\n queue_gate semaphore 429 • dlq", COLORS_P["Cache"])
         block(1580, y3, 780, 335, "STORAGE  MinIO + Disk fallback", "MinIO 9000 rs-outputs bucket\n Disk orchestrator/storage/ingest/*.tif\n audit.db + outputs/ 4-panel\n ingest_file EXIF GPS + validate_geotiff\n tiling 512+64 Window • geojson_export", COLORS_P["Storage"])
 
         y4 = y3 + 370
