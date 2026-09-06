@@ -37,10 +37,7 @@ export const useMapStore = create<MapState>((set)=>({
   activeBasemap: "satellite",
   layers: { imagery:true, detections:true, segmentation:true, changeMask:false, sar:false },
   selectedFeatureId: null,
-  features: [
-    { id:"mock_bbox_001", label:"Water body", confidence:0.87, source:"GroundingDINO", bboxNorm:[0.18,0.09,0.47,0.42], lngLat:[[-80.4,31.45],[-80.35,31.5]], type:"bbox" },
-    { id:"change_sector_a", label:"Sector A — Built-up increase", confidence:0.84, source:"ChangeChat", type:"polygon" },
-  ],
+  features: [],
   setCenter: (center)=> set({ center }),
   setZoom: (zoom)=> set({ zoom }),
   setActiveBasemap: (activeBasemap)=> set({ activeBasemap }),

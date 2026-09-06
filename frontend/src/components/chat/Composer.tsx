@@ -23,9 +23,7 @@ import {
 import { useChatStore, type ChatContext } from "@/store/chat.store";
 import { useWorkspaceStore } from "@/store/workspace.store";
 import { useExecutionStore } from "@/store/execution.store";
-import { cancelCurrentQuery } from "@/mocks/mockStream";
 import { executeRealAnalysis, cancelCurrentAnalysis } from "@/lib/analysisClient";
-import { analyses } from "@/mocks/analyses";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -155,7 +153,7 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
     const pendingUploadsRef = useRef<Set<string>>(new Set());
     const { globalStatus } = useExecutionStore();
     const { activeAnalysisId } = useWorkspaceStore();
-    const active = useMemo(() => analyses.find((a) => a.id === activeAnalysisId), [activeAnalysisId]);
+    const active: any = useMemo(() => null, [activeAnalysisId]);
     const isBusy = useMemo(() => ["queued", "planning", "executing", "aggregating", "composing"].includes(globalStatus), [globalStatus]);
 
     useImperativeHandle(
@@ -225,11 +223,9 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
             };
             try { reader.readAsDataURL(f); } catch {}
           }
-          // Real upload — POST /api/upload with field 'image', auth header
+          // Real upload — POST /api/upload with field 'image', auth header (no mock)
           pendingUploadsRef.current.add(tempId);
           (async () => {
-            const isMock = (import.meta as any).env?.VITE_USE_MOCK === "true" || (import.meta as any).env?.VITE_USE_MOCKS === "true";
-            if (isMock) { pendingUploadsRef.current.delete(tempId); return; }
             try {
               const tok = localStorage.getItem("satiq_token");
               const fd = new FormData();
@@ -442,19 +438,11 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
         }
         if (e.key === "Escape" && isBusy) {
           e.preventDefault();
-          // use same logic as handleStop — real cancel first
           (async () => {
             try {
               const ok = await cancelCurrentAnalysis();
               if (ok) toast.message("Stopped generation (backend)");
-              else {
-                const ok2 = cancelCurrentQuery();
-                if (ok2) toast.message("Stopped generation");
-              }
-            } catch {
-              const ok2 = cancelCurrentQuery();
-              if (ok2) toast.message("Stopped generation");
-            }
+            } catch {}
           })();
         }
       },
@@ -494,9 +482,8 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
 
     const canSend = useMemo(() => text.trim().length > 0 || activeContexts.length > 0, [text, activeContexts]);
 
-    // ---- Stop handler — real agentic cancel + force reset if stuck (fixes post-complete glitch)
+    // ---- Stop handler — real agentic cancel + force reset if stuck
     const handleStop = useCallback(async () => {
-      // try real first
       try {
         const okReal = await cancelCurrentAnalysis();
         if (okReal) {
@@ -504,11 +491,6 @@ export const Composer = forwardRef<{ send: (override?: string) => void }, Compos
           return;
         }
       } catch {}
-      const ok = cancelCurrentQuery();
-      if (ok) {
-        toast.message("Stopped generation");
-        return;
-      }
       // Fallback: if isBusy is stuck true but no abort id (stream already ended),
       // force reset so UI returns to Send state
       const { globalStatus } = useExecutionStore.getState();

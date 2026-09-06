@@ -26,7 +26,8 @@ export type ExecutionEventName =
   | "final_answer"
   | "query_completed"
   | "error"
-  | "cancelled";
+  | "cancelled"
+  | "queue_position";
 
 export interface ExecutionEvent {
   event: ExecutionEventName;

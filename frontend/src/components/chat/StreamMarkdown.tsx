@@ -515,7 +515,7 @@ export const StreamMarkdown = memo(function StreamMarkdown({ content }: { conten
         a: ({ href, children, ...props }: any) => {
           const h = String(href ?? "");
           const label = String(Array.isArray(children) ? children.join("") : children ?? "").toLowerCase();
-          const isBbox = h.includes("bbox") || h.includes("mock") || label.includes("view change") || label.includes("change area");
+          const isBbox = h.includes("bbox") || label.includes("view change") || label.includes("change area");
           const isEvidence = h.includes("evidence") || label.includes("evidence") || label.includes("open evidence");
           if (isBbox) {
             return (

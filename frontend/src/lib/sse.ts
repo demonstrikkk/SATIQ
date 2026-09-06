@@ -17,23 +17,6 @@ export function parseSSELine(line: string): ExecutionEvent | null {
   return null;
 }
 
-export function createMockEventSource(events: ExecutionEvent[], intervalMs = 450): { start: (h: SSEHandler)=>()=>void } {
-  return {
-    start(handler) {
-      let i = 0;
-      let cancelled = false;
-      const tick = () => {
-        if (cancelled || i >= events.length) return;
-        handler(events[i]!);
-        i++;
-        setTimeout(tick, intervalMs + Math.random()*200);
-      };
-      setTimeout(tick, 120);
-      return () => { cancelled = true; };
-    }
-  };
-}
-
 export async function consumeSSE(url: string, handler: SSEHandler, signal?: AbortSignal): Promise<void> {
   const res = await fetch(url, { headers: { Accept: "text/event-stream" }, signal });
   if (!res.body) return;

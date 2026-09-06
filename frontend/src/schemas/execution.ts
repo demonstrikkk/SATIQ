@@ -11,7 +11,7 @@ export const ExecutionEventSchema = z.object({
     "query_started","input_started","input_done",
     "planner_started","planner_done","execution_started",
     "model_started","model_progress","model_done","evidence_started","evidence_done",
-    "composer_started","thinking_delta","thinking_done","answer_delta","final_answer","query_completed","error","cancelled"
+    "composer_started","thinking_delta","thinking_done","answer_delta","final_answer","query_completed","error","cancelled","queue_position"
   ]),
   payload: z.any().optional(),
   timestamp: z.number().optional(),

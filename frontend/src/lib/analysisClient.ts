@@ -1,16 +1,14 @@
 /**
  * Real gateway client — agentic pipeline via gateway → orchestrator.
  * Production: consumeSSE via fetch SSE, all event types, Abort→cancel.
- * Mock behind flag: VITE_USE_MOCK=true or VITE_USE_MOCKS=true (dev).
+ * No mocks — fail-closed (MODEL_NOT_LINKED / queue_full banners).
  */
 import type { ExecutionEvent } from "@/schemas/execution";
 import { applyExecutionEvent, resetLastAssistantId } from "./applyEvent";
-import { simulateAnalysisQuery } from "@/mocks/mockStream";
 import { ensureToken } from "@/lib/auth";
 
 const GATEWAY = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "") || "";
 const TOKEN_KEY = "satiq_token";
-const USE_MOCK = (import.meta as any).env?.VITE_USE_MOCK === "true" || (import.meta as any).env?.VITE_USE_MOCKS === "true";
 
 let currentAbort: AbortController | null = null;
 let currentExecutionId: string | null = null;
@@ -48,10 +46,6 @@ export async function executeRealAnalysis(
   contexts: Array<{ id: string; type: string; label: string; preview?: string }>,
   signal?: AbortSignal
 ): Promise<void> {
-  if (USE_MOCK) {
-    await simulateAnalysisQuery(query, contexts as any);
-    return;
-  }
   const asset_ids = contexts.filter((c) => c.type === "image").map((c) => c.id);
   const spatial_refs = contexts.filter((c) => c.type === "aoi").map((c) => c.label);
   const abort = signal ? null : new AbortController();

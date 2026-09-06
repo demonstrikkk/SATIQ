@@ -36,12 +36,13 @@ export function applyExecutionEvent(ev: ExecutionEvent) {
       useSessionStore.getState().addBbox({ id: `bbox_${Date.now()}`, label, bbox_xyxy: bbox, bbox_normalized: norm, confidence: p.confidence ?? 0.87, turn });
       useSessionStore.getState().addTurn({ id: `turn_${turn}`, turn, query: label, bbox_xyxy: bbox, bbox_normalized: norm, label, confidence: p.confidence });
     }
-    if (p?.bbox_xyxy_absolute) {
-      useSessionStore.getState().addBbox({ id: "mock_bbox_002", label: p.label ?? "building footprint", bbox_xyxy: [135,55,165,75], bbox_normalized: p.bbox_normalized ?? [0.21,0.11,0.26,0.14], confidence: p.confidence ?? 0.89, turn: 2 });
+    if (p?.bbox_xyxy_absolute && p?.bbox_normalized) {
+      useSessionStore.getState().addBbox({ id: `bbox_${Date.now()}`, label: p.label ?? "building footprint", bbox_xyxy: p.bbox_xyxy_absolute, bbox_normalized: p.bbox_normalized, confidence: p.confidence ?? 0.89, turn: 2 });
     }
-    if (p?.model === "GroundingDINO" && !p?.bbox_xyxy_absolute) {
-      useMapStore.getState().addFeature({ id: "mock_bbox_001", label: p.label ?? "Water body", confidence: p.confidence ?? 0.87, source: "GroundingDINO", bboxNorm: p.bbox_normalized ?? [0.18, 0.09, 0.47, 0.42], lngLat: [[-80.4, 31.45], [-80.35, 31.5]], type: "bbox" } as any);
-      useMapStore.getState().setSelectedFeatureId("mock_bbox_001");
+    if (p?.model === "GroundingDINO" && !p?.bbox_xyxy_absolute && p?.bbox_normalized) {
+      const bid = `bbox_${Date.now()}`;
+      useMapStore.getState().addFeature({ id: bid, label: p.label ?? "Water body", confidence: p.confidence ?? 0.87, source: "GroundingDINO", bboxNorm: p.bbox_normalized, type: "bbox" } as any);
+      useMapStore.getState().setSelectedFeatureId(bid);
     }
     if (p?.model === "ChangeChat") {
       const s = useMapStore.getState();

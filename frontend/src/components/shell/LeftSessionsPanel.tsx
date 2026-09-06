@@ -5,7 +5,6 @@ import { useWorkspaceStore } from "@/store/workspace.store";
 import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useExecutionStore } from "@/store/execution.store";
-import { isMockGenerating, cancelCurrentQuery } from "@/mocks/mockStream";
 import { updateSessionBackend } from "@/lib/sessionSync";
 import { toast } from "sonner";
 
@@ -85,7 +84,6 @@ export function LeftSessionsPanel() {
 
   const handleNew = () => {
     // C1: never leave dangling AbortController — cancel before switching
-    if (isMockGenerating()) cancelCurrentQuery();
     // save current before switching
     if (activeAnalysisId) {
       persistMessages(activeAnalysisId, useChatStore.getState().messages);
@@ -99,7 +97,6 @@ export function LeftSessionsPanel() {
 
   const handleSelect = (id: string) => {
     if (id === activeAnalysisId) return;
-    if (isMockGenerating()) cancelCurrentQuery();
     // save current
     if (activeAnalysisId) {
       persistMessages(activeAnalysisId, useChatStore.getState().messages);
@@ -129,7 +126,6 @@ export function LeftSessionsPanel() {
   const handleDelete = (id: string) => {
     if (!confirm("Delete this chat? Messages will be lost.")) return;
     // C2: cancel generation if deleting the active session
-    if (activeAnalysisId === id && isMockGenerating()) cancelCurrentQuery();
     deleteSession(id);
     if (activeAnalysisId === id) {
       const next = useWorkspaceStore.getState().sessions[0];
@@ -153,7 +149,6 @@ export function LeftSessionsPanel() {
   };
 
   const handleClear = (id: string) => {
-    if (activeAnalysisId === id && isMockGenerating()) cancelCurrentQuery();
     persistMessages(id, []);
     if (activeAnalysisId === id) {
       clear();
@@ -164,7 +159,6 @@ export function LeftSessionsPanel() {
   };
 
   const handleDuplicate = (id: string) => {
-    if (isMockGenerating()) cancelCurrentQuery();
     try {
       const srcRaw = localStorage.getItem(`satiq:session:${id}:messages`);
       const srcMsgs = srcRaw ? JSON.parse(srcRaw) : [];

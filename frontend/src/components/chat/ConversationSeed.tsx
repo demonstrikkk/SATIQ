@@ -4,7 +4,6 @@ import { useChatStore, type ChatContext } from "@/store/chat.store";
 import { useWorkspaceStore } from "@/store/workspace.store";
 import { useExecutionStore } from "@/store/execution.store";
 import { executeRealAnalysis } from "@/lib/analysisClient";
-import { analyses } from "@/mocks/analyses";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -305,7 +304,7 @@ export function ConversationSeed({ autoFocus = false }: { autoFocus?: boolean })
     [globalStatus]
   );
   const { activeAnalysisId } = useWorkspaceStore();
-  const active = useMemo(() => analyses.find((a) => a.id === activeAnalysisId), [activeAnalysisId]);
+  const active: any = useMemo(() => null, [activeAnalysisId]);
 
   const resizeTextarea = useCallback(() => {
     const t = taRef.current;

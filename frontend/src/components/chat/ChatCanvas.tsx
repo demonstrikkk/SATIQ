@@ -7,7 +7,6 @@ import { Composer } from "./Composer";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { MessageTypingIndicator } from "@/components/ui/skeleton";
 import { ArrowDown, AlertTriangle, RotateCcw } from "lucide-react";
-import { cancelCurrentQuery } from "@/mocks/mockStream";
 import { executeRealAnalysis, cancelCurrentAnalysis } from "@/lib/analysisClient";
 
 const BUSY = ["queued", "planning", "executing", "aggregating", "composing"];
@@ -135,7 +134,6 @@ export function ChatCanvas() {
           <button
             onClick={async () => {
               try { if (await cancelCurrentAnalysis()) return; } catch {}
-              cancelCurrentQuery();
             }}
             className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-[#121615] border border-rose-500/20 px-3 py-1.5 text-xs font-medium text-rose-300 shadow-lg hover:bg-rose-500/10 transition-colors"
           >
